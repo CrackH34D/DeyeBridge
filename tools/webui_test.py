@@ -122,6 +122,11 @@ def run_check() -> int:
     return 0
 
 
+FAVICON = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+           "<rect width='64' height='64' rx='14' fill='%23b45309'/>"
+           "<path d='M36 8L18 36h12l-4 20 20-28H32l4-20z' fill='%23ffffff'/></svg>")
+
+
 class MockHandler(BaseHTTPRequestHandler):
     page_html = ""
 
@@ -135,7 +140,9 @@ class MockHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path.startswith("/values"):
+        if self.path.startswith("/favicon"):
+            self._send(200, FAVICON, "image/svg+xml")
+        elif self.path.startswith("/values"):
             values = ('{"pv_total_power":2220,"battery_soc":78,"battery_power":-1200,'
                       '"grid_power":250,"grid_connected":true,"time_slot_1":"06:30",'
                       '"overall_state":"normal"}')

@@ -258,6 +258,7 @@ namespace DeyeBridge
         int n = snprintf(page, sizeof(page),
             "<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23b45309'/><path d='M36 8L18 36h12l-4 20 20-28H32l4-20z' fill='%23ffffff'/></svg>\">"
             "<title>DeyeBridge</title><style>"
             ":root{--bg:#f6f7f4;--card:#ffffff;--text:#111827;--muted:#6b7280;"
             "--accent:#b45309;--accent2:#d97706;--accent-soft:#fdf0dd;--ok:#15803d;"
