@@ -1,0 +1,5 @@
+.pio/
+.vscode/
+*.bin
+build_number.txt
+.DS_Store
