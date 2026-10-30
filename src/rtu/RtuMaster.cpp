@@ -8,7 +8,8 @@ namespace Rtu
         mSerial = (uartNum == 1) ? &Serial1 : (uartNum == 2 ? &Serial2 : &Serial);
         mDePin = dePin;
 
-        if (mDePin >= 0)
+        // dePin <= 0 means auto-direction transceiver: no pin is driven
+        if (mDePin > 0)
         {
             pinMode(mDePin, OUTPUT);
             digitalWrite(mDePin, LOW);   // receive mode
@@ -24,14 +25,14 @@ namespace Rtu
 
     void RtuMaster::SendFrame(const uint8_t *frame, size_t length)
     {
-        if (mDePin >= 0)
+        if (mDePin > 0)
         {
             digitalWrite(mDePin, HIGH);
             delayMicroseconds(100);   // let the transceiver settle
         }
         mSerial->write(frame, length);
         mSerial->flush();             // wait until fully shifted out
-        if (mDePin >= 0)
+        if (mDePin > 0)
         {
             digitalWrite(mDePin, LOW);
         }

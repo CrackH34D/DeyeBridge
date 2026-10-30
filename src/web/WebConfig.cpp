@@ -245,57 +245,128 @@ namespace DeyeBridge
     void WebConfig::ServeConfigPage(WiFiClient &client)
     {
         const Settings &s = mStore->Get();
-        char page[8192];
+
+        // DE pin: -1 or 0 means "no DE pin" (auto-direction transceiver),
+        // shown as an empty field
+        char dePinText[8] = "";
+        if (s.rtuDePin > 0)
+        {
+            snprintf(dePinText, sizeof(dePinText), "%d", s.rtuDePin);
+        }
+
+        char page[12288];
         int n = snprintf(page, sizeof(page),
-            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>DeyeBridge</title><style>"
-            "body{font-family:sans-serif;max-width:640px;margin:2rem auto;padding:0 1rem}"
-            "input{width:100%%;padding:.4rem;margin:.2rem 0 .8rem}"
-            "label{font-weight:bold}button{padding:.6rem 1.5rem}"
-            "</style></head><body><h1>DeyeBridge Setup</h1>"
-            "<form method='POST' action='/save'>"
-            "<label>WiFi SSID</label><input name='wifi_ssid' value='%s'>"
-            "<label>WiFi Password</label><input name='wifi_pass' type='password' value='%s'>"
+            ":root{--bg:#f3f4f1;--card:#ffffff;--text:#1f2937;--muted:#6b7280;"
+            "--accent:#b45309;--accent-dark:#92400e;--ok:#15803d;--border:#e5e7eb}"
+            "*{box-sizing:border-box}"
+            "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+            "background:var(--bg);color:var(--text);margin:0;padding-bottom:3rem}"
+            "header{background:linear-gradient(135deg,var(--accent),var(--accent-dark));"
+            "color:#fff;padding:1.4rem 1rem 1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}"
+            ".wrap{max-width:680px;margin:0 auto;padding:0 1rem}"
+            "header h1{margin:0;font-size:1.35rem;font-weight:700}"
+            "header p{margin:.25rem 0 0;opacity:.85;font-size:.85rem}"
+            "h2{font-size:1rem;margin:0 0 .8rem;color:var(--accent-dark)}"
+            ".card{background:var(--card);border:1px solid var(--border);border-radius:10px;"
+            "padding:1.1rem 1.2rem;margin:1rem 0;box-shadow:0 1px 3px rgba(0,0,0,.05)}"
+            "label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);"
+            "margin:.7rem 0 .25rem;text-transform:uppercase;letter-spacing:.03em}"
+            "label:first-of-type{margin-top:0}"
+            "input[type=text],input[type=password],input[type=number]{width:100%%;"
+            "padding:.55rem .7rem;border:1px solid var(--border);border-radius:7px;"
+            "font-size:.95rem;background:#fafafa}"
+            "input:focus{outline:2px solid var(--accent);border-color:var(--accent)}"
+            "input[type=file]{font-size:.85rem;margin:.4rem 0}"
+            "button{background:var(--accent);color:#fff;border:none;border-radius:7px;"
+            "padding:.65rem 1.4rem;font-size:.95rem;font-weight:600;cursor:pointer;margin-top:1rem}"
+            "button:hover{background:var(--accent-dark)}"
+            ".hint{font-size:.78rem;color:var(--muted);margin:.3rem 0 0}"
+            ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem}"
+            ".tile{background:#fafaf8;border:1px solid var(--border);border-radius:8px;padding:.6rem .7rem}"
+            ".tile .k{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}"
+            ".tile .v{font-size:1.05rem;font-weight:700;margin-top:.15rem}"
+            ".status-ok{color:var(--ok)}"
+            "#otastatus{font-size:.9rem;font-weight:600;margin:.5rem 0 0;min-height:1.2em}"
+            "a{color:var(--accent-dark)}"
+            "footer{text-align:center;color:var(--muted);font-size:.75rem;margin-top:2rem}"
+            "</style></head><body>"
+            "<header><div class='wrap'><h1>DeyeBridge</h1>"
+            "<p>Deye Hybrid Inverter &middot; Modbus TCP + MQTT Bridge</p></div></header>"
+            "<div class='wrap'>"
+
+            "<div class='card'><h2>Live Values</h2><div class='grid' id='live'></div>"
+            "<p class='hint'>Auto-refresh alle 5 s &middot; "
+            "<a href='/values' target='_blank'>alle Werte als JSON</a></p></div>"
+
+            "<div class='card'><form method='POST' action='/save'>"
+            "<h2>WiFi</h2>"
+            "<label>SSID</label><input type='text' name='wifi_ssid' value='%s'>"
+            "<label>Password</label><input type='password' name='wifi_pass' value='%s'>"
+
             "<h2>MQTT</h2>"
-            "<label>Broker Host</label><input name='mqtt_host' value='%s'>"
-            "<label>Broker Port</label><input name='mqtt_port' value='%u'>"
-            "<label>Username</label><input name='mqtt_user' value='%s'>"
-            "<label>Password</label><input name='mqtt_pass' type='password' value='%s'>"
-            "<label>Client ID</label><input name='mqtt_client' value='%s'>"
-            "<label>Base Topic</label><input name='mqtt_base' value='%s'>"
+            "<label>Broker Host</label><input type='text' name='mqtt_host' value='%s'>"
+            "<label>Port</label><input type='number' name='mqtt_port' value='%u'>"
+            "<label>Username</label><input type='text' name='mqtt_user' value='%s'>"
+            "<label>Password</label><input type='password' name='mqtt_pass' value='%s'>"
+            "<label>Client ID</label><input type='text' name='mqtt_client' value='%s'>"
+            "<label>Base Topic</label><input type='text' name='mqtt_base' value='%s'>"
+
             "<h2>Deye RTU</h2>"
-            "<label>Slave ID</label><input name='slave_id' value='%u'>"
-            "<label>Baud Rate</label><input name='rtu_baud' value='%lu'>"
-            "<label>TX Pin</label><input name='rtu_tx' value='%d'>"
-            "<label>RX Pin</label><input name='rtu_rx' value='%d'>"
-            "<label>DE Pin</label><input name='rtu_de' value='%d'>"
-            "<h2>Intervals</h2>"
-            "<label>Poll Interval (ms)</label><input name='poll_ms' value='%lu'>"
-            "<label>Publish Interval (ms)</label><input name='pub_ms' value='%lu'>"
-            "<p><button type='submit'>Save &amp; Reboot</button></p>"
-            "</form>"
-            "<h2>OTA Update</h2>"
-            "<p>Firmware-Datei (.bin) direkt hochladen - das Ger&auml;t rebootet nach Erfolg.</p>"
+            "<label>Slave ID</label><input type='number' name='slave_id' value='%u'>"
+            "<label>Baud Rate</label><input type='number' name='rtu_baud' value='%lu'>"
+            "<label>TX Pin</label><input type='number' name='rtu_tx' value='%d'>"
+            "<label>RX Pin</label><input type='number' name='rtu_rx' value='%d'>"
+            "<label>DE Pin (optional)</label><input type='number' name='rtu_de' value='%s'>"
+            "<p class='hint'>DE/RE nur bei MAX485-Modulen mit Richtungssteuerung n&ouml;tig. "
+            "Leer lassen oder 0 eintragen bei Auto-Direction-Transceivern.</p>"
+
+            "<h2>Intervalle</h2>"
+            "<label>Poll Intervall (ms)</label><input type='number' name='poll_ms' value='%lu'>"
+            "<label>Publish Intervall (ms)</label><input type='number' name='pub_ms' value='%lu'>"
+
+            "<button type='submit'>Speichern &amp; Neustart</button>"
+            "</form></div>"
+
+            "<div class='card'><h2>OTA Update</h2>"
+            "<p class='hint'>Firmware-Datei (.bin) hochladen &ndash; das Ger&auml;t "
+            "rebootet nach Erfolg. Bei Fehlschlag bleibt die alte Firmware aktiv.</p>"
             "<input type='file' id='fwfile' accept='.bin'>"
             "<button onclick='otaUpload()'>Upload</button>"
-            "<p id='otastatus'></p>"
+            "<p id='otastatus'></p></div>"
+
+            "<footer>DeyeBridge v1.0.0</footer>"
+            "</div>"
             "<script>"
             "function otaUpload(){"
             "var f=document.getElementById('fwfile').files[0];"
-            "if(!f){document.getElementById('otastatus').textContent='No file selected';return;}"
-            "var s=document.getElementById('otastatus');s.textContent='Uploading...';"
+            "if(!f){document.getElementById('otastatus').textContent='Keine Datei ausgewaehlt';return;}"
+            "var s=document.getElementById('otastatus');s.textContent='Upload laeuft...';"
             "var x=new XMLHttpRequest();x.open('POST','/update');"
             "x.timeout=300000;"
             "x.onload=function(){s.textContent=x.responseText;};"
-            "x.onerror=function(){s.textContent='Upload failed (connection lost)';};"
+            "x.onerror=function(){s.textContent='Upload fehlgeschlagen (Verbindung verloren)';};"
             "x.send(f);}"
-            "</script>"
-            "<p><a href='/values'>/values</a> (JSON live data)</p></body></html>",
+            "var liveLabels={pv_total_power:'PV Total (W)',battery_soc:'Batterie (%)',"
+            "battery_power:'Batterie (W)',grid_power:'Netz (W)',load_power:'Verbrauch (W)',"
+            "inverter_power:'WR (W)',overall_state:'Status',grid_connected:'Netz verbunden'};"
+            "function refreshLive(){"
+            "fetch('/values').then(function(r){return r.json();}).then(function(d){"
+            "var html='';for(var k in liveLabels){"
+            "var v=(typeof d[k]==='undefined')?'-':d[k];"
+            "var cls=(k==='overall_state'&&v==='normal')?'status-ok':'';"
+            "html+='<div class=\"tile\"><div class=\"k\">'+liveLabels[k]+'</div>"
+            "<div class=\"v '+cls+'\">'+v+'</div></div>';}"
+            "document.getElementById('live').innerHTML=html;})"
+            ".catch(function(){});}"
+            "refreshLive();setInterval(refreshLive,5000);"
+            "</script></body></html>",
             s.wifiSsid, s.wifiPassword, s.mqttHost, s.mqttPort, s.mqttUser,
             s.mqttPassword, s.mqttClientId, s.mqttBaseTopic,
             s.slaveId, static_cast<unsigned long>(s.rtuBaud),
-            s.rtuTxPin, s.rtuRxPin, s.rtuDePin,
+            s.rtuTxPin, s.rtuRxPin, dePinText,
             static_cast<unsigned long>(s.pollIntervalMs),
             static_cast<unsigned long>(s.publishIntervalMs));
 
@@ -374,7 +445,8 @@ namespace DeyeBridge
         CopyFormField(body, "rtu_rx", buffer, sizeof(buffer));
         if (buffer[0]) { s.rtuRxPin = atoi(buffer); }
         CopyFormField(body, "rtu_de", buffer, sizeof(buffer));
-        if (buffer[0]) { s.rtuDePin = atoi(buffer); }
+        // Empty or 0 = auto-direction transceiver (no DE pin)
+        s.rtuDePin = buffer[0] ? atoi(buffer) : -1;
         CopyFormField(body, "poll_ms", buffer, sizeof(buffer));
         if (buffer[0]) { s.pollIntervalMs = static_cast<uint32_t>(atol(buffer)); }
         CopyFormField(body, "pub_ms", buffer, sizeof(buffer));

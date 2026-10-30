@@ -31,6 +31,6 @@ namespace Rtu
                           uint32_t responseTimeoutMs);
 
         HardwareSerial *mSerial = nullptr;
-        int mDePin = -1;
+        int mDePin = -1;   // <= 0: auto-direction transceiver, no pin driven
     };
 }
