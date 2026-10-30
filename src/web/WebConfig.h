@@ -22,6 +22,7 @@ namespace DeyeBridge
         void ServeConfigPage(WiFiClient &client);
         void ServeValues(WiFiClient &client);
         void HandleSave(WiFiClient &client, const char *body);
+        void HandleOtaUpload(WiFiClient &client, size_t contentLength);
         void SendResponse(WiFiClient &client, const char *contentType, const char *body, bool close);
 
         SettingsStore *mStore = nullptr;

@@ -1,5 +1,7 @@
 #include "WebConfig.h"
+#include <Update.h>
 #include "../util/Logging.h"
+#include "../util/Watchdog.h"
 #include "../core/ValueFormat.h"
 #include "../../include/Config.h"
 
@@ -85,6 +87,12 @@ namespace DeyeBridge
             return;
         }
 
+        if (strncmp(requestLine, "POST /update", 12) == 0)
+        {
+            HandleOtaUpload(client, contentLength);
+            return;
+        }
+
         if (strncmp(requestLine, "GET /values", 11) == 0)
         {
             ServeValues(client);
@@ -92,6 +100,83 @@ namespace DeyeBridge
         }
 
         ServeConfigPage(client);
+    }
+
+    void WebConfig::HandleOtaUpload(WiFiClient &client, size_t contentLength)
+    {
+        Log::info("OTA: firmware upload started (%u bytes)", static_cast<unsigned>(contentLength));
+
+        // The upload can take minutes; the watchdog must not restart us
+        Watchdog::Suspend();
+
+        const char *response;
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+        {
+            response = "OTA failed: not enough space";
+            Log::error("OTA: Update.begin failed (%s)", Update.errorString());
+        }
+        else
+        {
+            uint8_t buffer[1024];
+            size_t received = 0;
+            uint32_t lastLog = millis();
+
+            while (received < contentLength)
+            {
+                const size_t available = client.available();
+                if (available)
+                {
+                    const size_t chunk = available < sizeof(buffer) ? available : sizeof(buffer);
+                    const size_t got = client.readBytes(buffer, chunk);
+                    if (got == 0)
+                    {
+                        break;
+                    }
+                    if (Update.write(buffer, got) != got)
+                    {
+                        break;
+                    }
+                    received += got;
+                    if (millis() - lastLog > 5000)
+                    {
+                        lastLog = millis();
+                        Log::info("OTA: %u / %u bytes", static_cast<unsigned>(received),
+                                  static_cast<unsigned>(contentLength));
+                    }
+                }
+                else if (!client.connected())
+                {
+                    break;
+                }
+                else
+                {
+                    delay(1);
+                }
+            }
+
+            if (received == contentLength && Update.end(true))
+            {
+                Log::info("OTA: update complete, rebooting");
+                client.print("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+                             "Update successful, rebooting...");
+                client.flush();
+                delay(500);
+                ESP.restart();
+                return;
+            }
+
+            response = "OTA failed: transfer incomplete or invalid image";
+            Log::error("OTA: failed after %u bytes (%s)", static_cast<unsigned>(received),
+                       Update.errorString());
+            Update.abort();
+        }
+
+        char body[192];
+        snprintf(body, sizeof(body),
+                 "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s",
+                 response);
+        client.print(body);
+        Watchdog::Resume();
     }
 
     void WebConfig::ServeValues(WiFiClient &client)
@@ -189,7 +274,24 @@ namespace DeyeBridge
             "<label>Poll Interval (ms)</label><input name='poll_ms' value='%lu'>"
             "<label>Publish Interval (ms)</label><input name='pub_ms' value='%lu'>"
             "<p><button type='submit'>Save &amp; Reboot</button></p>"
-            "</form><p><a href='/values'>/values</a> (JSON live data)</p></body></html>",
+            "</form>"
+            "<h2>OTA Update</h2>"
+            "<p>Firmware-Datei (.bin) direkt hochladen - das Ger&auml;t rebootet nach Erfolg.</p>"
+            "<input type='file' id='fwfile' accept='.bin'>"
+            "<button onclick='otaUpload()'>Upload</button>"
+            "<p id='otastatus'></p>"
+            "<script>"
+            "function otaUpload(){"
+            "var f=document.getElementById('fwfile').files[0];"
+            "if(!f){document.getElementById('otastatus').textContent='No file selected';return;}"
+            "var s=document.getElementById('otastatus');s.textContent='Uploading...';"
+            "var x=new XMLHttpRequest();x.open('POST','/update');"
+            "x.timeout=300000;"
+            "x.onload=function(){s.textContent=x.responseText;};"
+            "x.onerror=function(){s.textContent='Upload failed (connection lost)';};"
+            "x.send(f);}"
+            "</script>"
+            "<p><a href='/values'>/values</a> (JSON live data)</p></body></html>",
             s.wifiSsid, s.wifiPassword, s.mqttHost, s.mqttPort, s.mqttUser,
             s.mqttPassword, s.mqttClientId, s.mqttBaseTopic,
             s.slaveId, static_cast<unsigned long>(s.rtuBaud),

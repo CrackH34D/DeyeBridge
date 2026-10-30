@@ -17,6 +17,7 @@ Das Besondere: **evcc und Home Assistant können parallel steuern.** Alle Schrei
 - Schreib-Whitelist: nur die Steuerregister des Wechselrichters sind beschreibbar (109, 127, 128, 130, 143, 145, 146, 154–171), alles andere wird mit `ILLEGAL DATA ADDRESS` abgelehnt
 - MQTT: Einzelwerte, JSON-State, HA-Discovery (Sensoren + Number/Switch-Steuer-Entities), Command-Topics, LWT-Status
 - Web-Setup (`http://<ip>/` oder Fallback-AP `DeyeBridge-Setup` / Passwort `deye12345`): WiFi, MQTT, RTU-Pins/Baudrate/Slave-ID, Intervalle; Live-Daten unter `/values`
+- **OTA-Update** über das Web-UI: `.bin`-Datei hochladen, Gerät rebootet nach Erfolg (Watchdog wird während des Uploads pausiert)
 - Hardware-Watchdog (restartet bei hängendem Haupt-Loop)
 
 ## Hardware
@@ -41,7 +42,10 @@ pio run                    # nur bauen
 pio test -e native         # Host-Unit-Tests (CRC16, Queue, Registerplan)
 ```
 
-Erstflash über USB. Danach im Web-UI konfigurieren (WiFi, MQTT, RTU-Pins) – das Gerät rebootet nach dem Speichern.
+Erstflash über USB. Danach Updates bequem über das Web-UI: Firmware-Release
+(`.bin`) unter **OTA Update** hochladen – das Gerät schreibt die neue Firmware
+in die zweite App-Partition und rebootet (bei Fehlschlag bleibt die alte
+Firmware aktiv).
 
 ## evcc anbinden
 
@@ -89,7 +93,6 @@ MQTT-Integration aktivieren, Broker-Verbindung im DeyeBridge-Web-UI eintragen �
   gegen die eigene Inverter-Firmware prüfen; Register-Skalierungen variieren
   je nach Modell und Firmware-Stand (z. B. HV-Modelle mit Firmware ≥ 1098:
   Register 143 in 10-W-Schritten, evcc-Option `firmware1098`).
-- **Kein OTA-Update** – Firmware-Updates laufen über USB (`pio run -t upload`).
 - Das MQTT-Switch-Entity „Time of Use" schreibt Register 146 als 0x00FF/0.
   Wenn evcc gleichzeitig Batteriemodus steuert, überschreibt es 146 laufend –
   HA-Schreibzugriff auf 146/127/166–171 nur mit Bewusstsein (Details in

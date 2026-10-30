@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_system.h>
 
 #include "Config.h"
 #include "util/Logging.h"
+#include "util/Watchdog.h"
 #include "web/Settings.h"
 #include "web/WebConfig.h"
 #include "rtu/RtuMaster.h"
@@ -29,23 +29,7 @@ static DeyeBridge::MqttClient gMqtt;
 static WebConfig gWeb;
 static WiFiClient gWifiClientMqtt;
 
-static TaskHandle_t gWatchdogTaskHandle = nullptr;
 static bool gRtuReady = false;
-
-// Independent watchdog task: restarts the device when the main loop stops
-// notifying (WiFi/RTU/TCP/MQTT all run from the single main loop task)
-static void WatchdogTask(void *)
-{
-    for (;;)
-    {
-        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(Config::WatchdogTimeoutMs)) == 0)
-        {
-            Log::error("Watchdog timeout, restarting");
-            delay(100);
-            esp_restart();
-        }
-    }
-}
 
 static bool WifiConnected()
 {
@@ -141,18 +125,14 @@ void setup()
     gMqtt.Init(gWifiClientMqtt, &gCache, &gWriteQueue, gSettings.Get());
 
     // Watchdog last: setup itself may block (WiFi connect)
-    xTaskCreatePinnedToCore(WatchdogTask, "watchdog", 3072, nullptr, 1,
-                            &gWatchdogTaskHandle, 0);
+    DeyeBridge::Watchdog::Start(Config::WatchdogTimeoutMs);
 
     Log::info("Setup complete");
 }
 
 void loop()
 {
-    if (gWatchdogTaskHandle != nullptr)
-    {
-        xTaskNotify(gWatchdogTaskHandle, 1, eSetValueWithOverwrite);
-    }
+    DeyeBridge::Watchdog::NotifyLoopAlive();
 
     WifiMaintain();
     gWeb.ProcessEvents();
