@@ -84,9 +84,19 @@ MQTT-Integration aktivieren, Broker-Verbindung im DeyeBridge-Web-UI eintragen �
 
 ## Bekannte Einschränkungen
 
-- Register 143 (Max Sell Power) ist bei **HV-Modellen** mit Firmware ≥ 1098 in 10-W-Schritten skaliert (evcc-Option `firmware1098`). Die Brücke reicht rohe Register durch – die Skalierungskonvention liegt bei den Clients.
-- Das MQTT-Switch-Entity „Time of Use" schreibt Register 146 als Ganzes (0x00FF/0). Wenn evcc gleichzeitig Batteriemodus steuert, überschreibt es 146 laufend – HA-Schreibzugriff auf 146/127/166–171 nur mit Bewusstsein (Details in [docs/homeassistant.md](docs/homeassistant.md)).
-- Nur ein RTU-Master pro Bus: den Deye-WLAN-Dongle an denselben RS485-Bus stecken geht nicht; der Deye hat bei den Hybrid-Modellen zwei RJ45-Ports (zwei getrennte Busse) – Dongle und ESP gehören auf getrennte Busse.
+- **Noch nicht an realer Hardware verifiziert** – vor dem Produktivbetrieb die
+  Werte (Skalierungen, Battery-Strom-Vorzeichen, Register-143-Einheiten)
+  gegen die eigene Inverter-Firmware prüfen; Register-Skalierungen variieren
+  je nach Modell und Firmware-Stand (z. B. HV-Modelle mit Firmware ≥ 1098:
+  Register 143 in 10-W-Schritten, evcc-Option `firmware1098`).
+- **Kein OTA-Update** – Firmware-Updates laufen über USB (`pio run -t upload`).
+- Das MQTT-Switch-Entity „Time of Use" schreibt Register 146 als 0x00FF/0.
+  Wenn evcc gleichzeitig Batteriemodus steuert, überschreibt es 146 laufend –
+  HA-Schreibzugriff auf 146/127/166–171 nur mit Bewusstsein (Details in
+  [docs/homeassistant.md](docs/homeassistant.md)).
+- Nur ein RTU-Master pro Bus: den Deye-WLAN-Dongle an denselben RS485-Bus
+  stecken geht nicht; die Hybrid-Modelle haben zwei getrennte Busse – Dongle
+  und ESP gehören auf getrennte Busse.
 
 ## Lizenz
 

@@ -502,7 +502,11 @@ namespace DeyeBridge
             }
             if (mQueue->Push(e.address, raw, e.clearMask))
             {
-                mCache->Poke(e.address, raw);
+                // Optimistic mirror, masked like the poller will apply it
+                mCache->Poke(e.address,
+                             static_cast<uint16_t>((mCache->Get(e.address) &
+                                                    static_cast<uint16_t>(~e.clearMask)) |
+                                                   (raw & e.clearMask)));
                 Log::info("MQTT: queued write %s (reg %u) = %u (mask %04X)",
                           e.key, e.address, raw, e.clearMask);
             }

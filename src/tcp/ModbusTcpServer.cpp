@@ -199,7 +199,6 @@ namespace DeyeBridge
         mQueue->Push(address, value, 0xFFFF);
         mCache->Poke(address, value);
         Log::info("Modbus TCP: queued write reg %u = %u", address, value);
-
         // FC06 echoes the request
         memcpy(response, pdu, 5);
         return 5;
