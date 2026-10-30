@@ -12,13 +12,14 @@ namespace DeyeBridge
     struct WriteEntry
     {
         uint16_t address;
-        uint16_t value;
+        uint16_t value;      // bits to set
+        uint16_t clearMask;  // bits allowed to change (0xFFFF = whole register)
     };
 
     class WriteQueue
     {
     public:
-        bool Push(uint16_t address, uint16_t value);
+        bool Push(uint16_t address, uint16_t value, uint16_t clearMask);
         bool Pop(WriteEntry &out);
         bool Empty() const { return mSize == 0; }
         size_t Size() const { return mSize; }

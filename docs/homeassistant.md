@@ -14,27 +14,45 @@ eingetragen wurde, erscheinen alle Entities automatisch (MQTT Discovery).
 | Steuerung | `<base>/set/<key>` (z. B. `deye/set/max_sell_power`) |
 | HA-Discovery | `homeassistant/<typ>/deye-bridge/<key>/config` (retained) |
 
-## Sensor-Entities (Auszug)
+## Sensor-Entities
 
-- `pv1_power` … `pv4_power`, `pv_total_power`
-- `battery_soc`, `battery_voltage`, `battery_power`, `battery_current`, `battery_temperature`
-- `grid_power`, `grid_l1_power` … `grid_l3_power`, `grid_voltage_l1` … `grid_voltage_l3`,
+Vollständige Abbildung des Register-Satzes der Referenz-ESPHome-Konfiguration:
+
+- PV: `pv1_power` … `pv4_power`, `pv_total_power`, `pv1_voltage` … `pv4_voltage`, `pv1_current` … `pv4_current`
+- Batterie: `battery_soc`, `battery_voltage`, `battery_power`, `battery_current`, `battery_temperature`, `battery_capacity_shutdown`
+- Netz: `grid_power`, `grid_l1_power` … `grid_l3_power`, `grid_voltage_l1` … `grid_voltage_l3`,
   `grid_current_l1` … `grid_current_l3`, `grid_frequency`, `ct_power`
-- `inverter_power`, `inverter_l1_power` … `inverter_l3_power`, `inverter_frequency`
-- `load_power`, `load_l1_power` … `load_l3_power`, `gen_power`
+- Wechselrichter: `inverter_power`, `inverter_l1_power` … `inverter_l3_power`,
+  `inverter_l1_voltage` … `inverter_l3_voltage`, `inverter_frequency`
+- Last/Gen: `load_power`, `load_l1_power` … `load_l3_power`, `gen_power`, `gen_l1_power` … `gen_l3_power`
 - Energiezähler: `day_*` und `total_*` (kWh, `total_increasing`)
-- `dc_transformer_temperature`, `radiator_temperature`, `overall_state` (Text)
+- Temperaturen: `dc_transformer_temperature`, `radiator_temperature`
+- Status: `overall_state` (Text), `grid_connected` (binary_sensor), `system_mode_time1` … `system_mode_time6`,
+  `time_slot_1` … `time_slot_6` (Text „HH:MM")
 
 ## Steuer-Entities
 
 | Entity | Register | Typ | Bereich |
 |--------|----------|-----|---------|
-| Max Sell Power | 143 | number | 0–12000 W, Schritt 100 |
+| Zero Export | 104 | number | -20–20 W |
+| Battery Max Charge Current | 108 | number | 0–210 A, Schritt 5 |
 | Battery Max Discharge Current | 109 | number | 0–210 A, Schritt 5 |
-| Grid Charge Current | 128 | number | 0–210 A, Schritt 5 |
 | Grid Charge Start SOC | 127 | number | 0–100 % |
+| Grid Charge Current | 128 | number | 0–210 A, Schritt 5 |
+| Max Sell Power | 143 | number | 0–12000 W, Schritt 100 |
+| System Mode Power Time 1–6 | 154–159 | number | 0–12000 W, Schritt 100 |
+| System Mode V Time 1–6 | 160–165 | number | 4320–5760 (V×10), Schritt 10 |
+| System Mode SOC Time 1–6 | 166–171 | number | 0–100 % |
+| Inverter ON/OFF | 80 | switch | ON/OFF (Bit 0) |
 | Solar Sell | 145 | switch | ON/OFF (Bit 0) |
 | Time of Use | 146 | switch | ON = 0x00FF (alle Tage), OFF = 0 |
+| Grid Charge Time 1–6 | 172–177 | switch | ON/OFF (Bit 0) |
+| Energy Pattern | 141 | select | Battery first / Load first |
+| Work Mode | 142 | select | Selling First / Zero Export + Limit to Load Only / Limited to Home |
+
+Bitmask-Register (80, 145, 172–177) werden per **Read-Modify-Write** über den
+Cache beschrieben – andere Bits im Register bleiben erhalten, genau wie die
+ESPHome-Switches mit `bitmask: 1`.
 
 Beispiel Steuerung per MQTT:
 

@@ -196,7 +196,7 @@ namespace DeyeBridge
             return BuildException(pdu[0], 0x02, response);
         }
 
-        mQueue->Push(address, value);
+        mQueue->Push(address, value, 0xFFFF);
         mCache->Poke(address, value);
         Log::info("Modbus TCP: queued write reg %u = %u", address, value);
 
@@ -237,7 +237,7 @@ namespace DeyeBridge
         {
             const uint16_t value = (static_cast<uint16_t>(pdu[6 + i * 2]) << 8) |
                                    static_cast<uint16_t>(pdu[7 + i * 2]);
-            mQueue->Push(start + i, value);
+            mQueue->Push(start + i, value, 0xFFFF);
             mCache->Poke(start + i, value);
         }
         Log::info("Modbus TCP: queued %u writes starting at reg %u", count, start);

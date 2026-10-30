@@ -38,9 +38,18 @@ namespace DeyeBridge
                 break;
             }
 
-            // Single-word writes go out as FC06; bursts of adjacent registers
-            // are coalesced later, one frame per entry keeps the queue simple
-            const bool ok = mMaster->WriteSingle(mSlaveId, entry.address, entry.value,
+            // Masked writes (switches, bitmask registers) are read-modify-write
+            // over the current cache value so other bits are preserved; full
+            // writes (clearMask 0xFFFF) pass the value straight through
+            uint16_t value = entry.value;
+            if (entry.clearMask != 0xFFFF)
+            {
+                value = static_cast<uint16_t>(
+                    (mCache->Get(entry.address) & static_cast<uint16_t>(~entry.clearMask)) |
+                    (entry.value & entry.clearMask));
+            }
+
+            const bool ok = mMaster->WriteSingle(mSlaveId, entry.address, value,
                                                  Config::RtuResponseTimeoutMs);
             if (ok)
             {

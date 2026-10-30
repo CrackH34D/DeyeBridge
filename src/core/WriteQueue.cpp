@@ -2,7 +2,7 @@
 
 namespace DeyeBridge
 {
-    bool WriteQueue::Push(uint16_t address, uint16_t value)
+    bool WriteQueue::Push(uint16_t address, uint16_t value, uint16_t clearMask)
     {
         if (mSize >= kCapacity)
         {
@@ -10,6 +10,7 @@ namespace DeyeBridge
         }
         mEntries[mTail].address = address;
         mEntries[mTail].value = value;
+        mEntries[mTail].clearMask = clearMask == 0 ? 0xFFFF : clearMask;
         mTail = (mTail + 1) % kCapacity;
         ++mSize;
         return true;

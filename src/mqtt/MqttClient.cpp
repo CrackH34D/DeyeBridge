@@ -111,6 +111,7 @@ namespace DeyeBridge
             "\"device\":{\"identifiers\":[\"deye-bridge\"],\"name\":\"Deye Hybrid Inverter\","
             "\"manufacturer\":\"Deye\",\"model\":\"Hybrid Inverter (DeyeBridge)\",\"sw_version\":\"1.0.0\"}";
 
+        // Numeric sensors
         for (size_t i = 0; i < DeyeRegisters::kSensorCount; ++i)
         {
             const DeyeRegisters::SensorEntity &e = DeyeRegisters::kSensors[i];
@@ -140,7 +141,22 @@ namespace DeyeBridge
             SendIfConnected(topic, payload, true);
         }
 
-        // Overall state as text sensor
+        // Binary sensors
+        for (size_t i = 0; i < DeyeRegisters::kBinaryCount; ++i)
+        {
+            const DeyeRegisters::BinaryEntity &e = DeyeRegisters::kBinaries[i];
+            char stateTopic[72];
+            snprintf(stateTopic, sizeof(stateTopic), "%ssensor/%s", mBase, e.key);
+            snprintf(payload, sizeof(payload),
+                "{\"name\":\"%s\",\"unique_id\":\"deye-bridge_%s\","
+                "\"state_topic\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
+                "\"availability_topic\":\"%sstatus\",%s}",
+                e.name, e.key, stateTopic, mBase, device);
+            snprintf(topic, sizeof(topic), "homeassistant/binary_sensor/deye-bridge/%s/config", e.key);
+            SendIfConnected(topic, payload, true);
+        }
+
+        // Text sensors: overall state, computed time slots
         {
             char stateTopic[72];
             snprintf(stateTopic, sizeof(stateTopic), "%ssensor/overall_state", mBase);
@@ -149,6 +165,19 @@ namespace DeyeBridge
                 "\"state_topic\":\"%s\",\"availability_topic\":\"%sstatus\",%s}",
                 stateTopic, mBase, device);
             snprintf(topic, sizeof(topic), "homeassistant/sensor/deye-bridge/overall_state/config");
+            SendIfConnected(topic, payload, true);
+        }
+        for (size_t i = 0; i < DeyeRegisters::kTimeSlotCount; ++i)
+        {
+            const DeyeRegisters::TextEntity &e = DeyeRegisters::kTimeSlots[i];
+            char stateTopic[72];
+            snprintf(stateTopic, sizeof(stateTopic), "%ssensor/%s", mBase, e.key);
+            snprintf(payload, sizeof(payload),
+                "{\"name\":\"%s\",\"unique_id\":\"deye-bridge_%s\","
+                "\"state_topic\":\"%s\",\"icon\":\"mdi:clock\","
+                "\"availability_topic\":\"%sstatus\",%s}",
+                e.name, e.key, stateTopic, mBase, device);
+            snprintf(topic, sizeof(topic), "homeassistant/sensor/deye-bridge/%s/config", e.key);
             SendIfConnected(topic, payload, true);
         }
 
@@ -166,10 +195,11 @@ namespace DeyeBridge
             SendIfConnected(topic, payload, true);
         }
 
+        // Controls: numbers, switches, selects
         for (size_t i = 0; i < DeyeRegisters::kControlCount; ++i)
         {
             const DeyeRegisters::ControlEntity &e = DeyeRegisters::kControls[i];
-            const char *domain = e.isSwitch ? "switch" : "number";
+            const char *domain = e.isSelect ? "select" : (e.isSwitch ? "switch" : "number");
             char stateTopic[72];
             char commandTopic[72];
             snprintf(stateTopic, sizeof(stateTopic), "%ssensor/%s", mBase, e.key);
@@ -182,8 +212,23 @@ namespace DeyeBridge
                     "{\"name\":\"%s\",\"unique_id\":\"deye-bridge_%s\","
                     "\"state_topic\":\"%s\",\"command_topic\":\"%s\","
                     "\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
-                    "\"availability_topic\":\"%sstatus\",%s}",
-                    e.name, e.key, stateTopic, commandTopic, mBase, device);
+                    "\"availability_topic\":\"%sstatus\",",
+                    e.name, e.key, stateTopic, commandTopic, mBase);
+            }
+            else if (e.isSelect)
+            {
+                n = snprintf(payload, sizeof(payload),
+                    "{\"name\":\"%s\",\"unique_id\":\"deye-bridge_%s\","
+                    "\"state_topic\":\"%s\",\"command_topic\":\"%s\","
+                    "\"options\":[",
+                    e.name, e.key, stateTopic, commandTopic);
+                for (size_t o = 0; o < e.optionCount; ++o)
+                {
+                    n += snprintf(payload + n, sizeof(payload) - n, "%s\"%s\"",
+                                  o ? "," : "", e.options[o].label);
+                }
+                n += snprintf(payload + n, sizeof(payload) - n, "],"
+                    "\"availability_topic\":\"%sstatus\",", mBase);
             }
             else
             {
@@ -198,18 +243,21 @@ namespace DeyeBridge
                 {
                     n += snprintf(payload + n, sizeof(payload) - n, "\"unit_of_measurement\":\"%s\",", e.unit);
                 }
-                if (e.icon)
-                {
-                    n += snprintf(payload + n, sizeof(payload) - n, "\"icon\":\"%s\",", e.icon);
-                }
-                snprintf(payload + n, sizeof(payload) - n, "%s}", device);
             }
+            if (e.icon)
+            {
+                n += snprintf(payload + n, sizeof(payload) - n, "\"icon\":\"%s\",", e.icon);
+            }
+            snprintf(payload + n, sizeof(payload) - n, "%s}", device);
 
             snprintf(topic, sizeof(topic), "homeassistant/%s/deye-bridge/%s/config", domain, e.key);
             SendIfConnected(topic, payload, true);
         }
 
-        Log::info("MQTT: Home Assistant discovery published");
+        Log::info("MQTT: Home Assistant discovery published (%u sensors, %u binaries, %u controls)",
+                  static_cast<unsigned>(DeyeRegisters::kSensorCount + 2 + DeyeRegisters::kTimeSlotCount),
+                  static_cast<unsigned>(DeyeRegisters::kBinaryCount),
+                  static_cast<unsigned>(DeyeRegisters::kControlCount));
     }
 
     void MqttClient::FormatValue(const DeyeRegisters::SensorEntity &entity, char *out, size_t size) const
@@ -235,6 +283,40 @@ namespace DeyeBridge
             SendIfConnected(topic, value, false);
         }
 
+        // Binary sensors
+        for (size_t i = 0; i < DeyeRegisters::kBinaryCount; ++i)
+        {
+            const DeyeRegisters::BinaryEntity &e = DeyeRegisters::kBinaries[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            snprintf(topic, sizeof(topic), "%ssensor/%s", mBase, e.key);
+            SendIfConnected(topic, mCache->Get(e.address) != 0 ? "ON" : "OFF", false);
+        }
+
+        // Overall state as text
+        if (mCache->IsValid(500))
+        {
+            snprintf(topic, sizeof(topic), "%ssensor/overall_state", mBase);
+            SendIfConnected(topic, DeyeRegisters::OverallStateName(mCache->Get(500)), false);
+        }
+
+        // Computed time slots (HH:MM from raw HHMM)
+        for (size_t i = 0; i < DeyeRegisters::kTimeSlotCount; ++i)
+        {
+            const DeyeRegisters::TextEntity &e = DeyeRegisters::kTimeSlots[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            const uint16_t raw = mCache->Get(e.address);
+            snprintf(value, sizeof(value), "%02u:%02u",
+                     static_cast<unsigned>(raw / 100), static_cast<unsigned>(raw % 100));
+            snprintf(topic, sizeof(topic), "%ssensor/%s", mBase, e.key);
+            SendIfConnected(topic, value, false);
+        }
+
         // Computed total PV power (raw register values, W)
         if (mCache->IsValid(672))
         {
@@ -243,13 +325,6 @@ namespace DeyeBridge
             snprintf(value, sizeof(value), "%ld", static_cast<long>(total));
             snprintf(topic, sizeof(topic), "%ssensor/pv_total_power", mBase);
             SendIfConnected(topic, value, false);
-        }
-
-        // Overall state as text
-        if (mCache->IsValid(500))
-        {
-            snprintf(topic, sizeof(topic), "%ssensor/overall_state", mBase);
-            SendIfConnected(topic, DeyeRegisters::OverallStateName(mCache->Get(500)), false);
         }
 
         // Control entity states
@@ -261,22 +336,43 @@ namespace DeyeBridge
                 continue;
             }
             snprintf(topic, sizeof(topic), "%ssensor/%s", mBase, e.key);
+            const uint16_t raw = mCache->Get(e.address);
+
             if (e.isSwitch)
             {
-                SendIfConnected(topic, mCache->Get(e.address) == e.onValue ? "ON" : "OFF", false);
+                const bool on = (raw & e.clearMask) == (e.onValue & e.clearMask);
+                SendIfConnected(topic, on ? "ON" : "OFF", false);
+            }
+            else if (e.isSelect)
+            {
+                const char *label = "unknown";
+                for (size_t o = 0; o < e.optionCount; ++o)
+                {
+                    if (e.options[o].value == raw)
+                    {
+                        label = e.options[o].label;
+                        break;
+                    }
+                }
+                SendIfConnected(topic, label, false);
             }
             else
             {
-                const float engineeringValue = static_cast<float>(static_cast<int16_t>(mCache->Get(e.address))) * e.scale;
+                const int16_t signedRaw = e.isSigned
+                    ? static_cast<int16_t>(raw)
+                    : static_cast<int16_t>(raw);
+                const float engineeringValue = static_cast<float>(signedRaw) * e.scale;
                 snprintf(value, sizeof(value), "%.0f", engineeringValue);
                 SendIfConnected(topic, value, false);
             }
         }
 
         // Compact JSON state for non-HA consumers
-        char json[1536];
+        char json[2048];
         size_t n = 0;
         bool first = true;
+
+        n += snprintf(json + n, sizeof(json) - n, "{");
         for (size_t i = 0; i < DeyeRegisters::kSensorCount; ++i)
         {
             const DeyeRegisters::SensorEntity &e = DeyeRegisters::kSensors[i];
@@ -287,6 +383,30 @@ namespace DeyeBridge
             FormatValue(e, value, sizeof(value));
             n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":%s",
                           first ? "" : ",", e.key, value);
+            first = false;
+        }
+        for (size_t i = 0; i < DeyeRegisters::kBinaryCount; ++i)
+        {
+            const DeyeRegisters::BinaryEntity &e = DeyeRegisters::kBinaries[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":%s",
+                          first ? "" : ",", e.key, mCache->Get(e.address) ? "true" : "false");
+            first = false;
+        }
+        for (size_t i = 0; i < DeyeRegisters::kTimeSlotCount; ++i)
+        {
+            const DeyeRegisters::TextEntity &e = DeyeRegisters::kTimeSlots[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            const uint16_t raw = mCache->Get(e.address);
+            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":\"%02u:%02u\"",
+                          first ? "" : ",", e.key,
+                          static_cast<unsigned>(raw / 100), static_cast<unsigned>(raw % 100));
             first = false;
         }
         if (mCache->IsValid(672))
@@ -328,7 +448,7 @@ namespace DeyeBridge
         memcpy(key, keyStart, keyLength);
         key[keyLength] = '\0';
 
-        char payloadText[16];
+        char payloadText[48];
         const size_t copyLength = length < sizeof(payloadText) - 1 ? length : sizeof(payloadText) - 1;
         memcpy(payloadText, payload, copyLength);
         payloadText[copyLength] = '\0';
@@ -348,21 +468,43 @@ namespace DeyeBridge
                                 strcmp(payloadText, "1") == 0 || strcmp(payloadText, "true") == 0;
                 raw = on ? e.onValue : e.offValue;
             }
+            else if (e.isSelect)
+            {
+                bool matched = false;
+                raw = 0;
+                for (size_t o = 0; o < e.optionCount; ++o)
+                {
+                    if (strcmp(payloadText, e.options[o].label) == 0)
+                    {
+                        raw = e.options[o].value;
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched)
+                {
+                    Log::warn("MQTT: unknown option '%s' for %s", payloadText, e.key);
+                    return;
+                }
+            }
             else
             {
                 const float value = atof(payloadText);
                 const float clamped = value < e.minValue ? e.minValue : (value > e.maxValue ? e.maxValue : value);
-                raw = static_cast<uint16_t>(clamped / e.scale + 0.5f);
+                const int32_t scaled = static_cast<int32_t>(clamped / e.scale + (clamped < 0 ? -0.5f : 0.5f));
+                raw = static_cast<uint16_t>(scaled);
             }
 
             if (!DeyeRegisters::IsWritable(e.address))
             {
+                Log::warn("MQTT: register %u for %s is not writable", e.address, e.key);
                 return;
             }
-            if (mQueue->Push(e.address, raw))
+            if (mQueue->Push(e.address, raw, e.clearMask))
             {
                 mCache->Poke(e.address, raw);
-                Log::info("MQTT: queued write %s (reg %u) = %u", e.key, e.address, raw);
+                Log::info("MQTT: queued write %s (reg %u) = %u (mask %04X)",
+                          e.key, e.address, raw, e.clearMask);
             }
             else
             {

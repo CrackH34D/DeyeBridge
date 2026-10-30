@@ -126,6 +126,32 @@ namespace DeyeBridge
         {
             n += snprintf(json + n, sizeof(json) - n, "%s\"overall_state\":\"%s\"",
                           first ? "" : ",", DeyeRegisters::OverallStateName(mCache->Get(500)));
+            first = false;
+        }
+        for (size_t i = 0; i < DeyeRegisters::kBinaryCount; ++i)
+        {
+            const DeyeRegisters::BinaryEntity &e = DeyeRegisters::kBinaries[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":%s",
+                          first ? "" : ",", e.key,
+                          mCache->Get(e.address) ? "true" : "false");
+            first = false;
+        }
+        for (size_t i = 0; i < DeyeRegisters::kTimeSlotCount; ++i)
+        {
+            const DeyeRegisters::TextEntity &e = DeyeRegisters::kTimeSlots[i];
+            if (!mCache->IsValid(e.address))
+            {
+                continue;
+            }
+            const uint16_t raw = mCache->Get(e.address);
+            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":\"%02u:%02u\"",
+                          first ? "" : ",", e.key,
+                          static_cast<unsigned>(raw / 100), static_cast<unsigned>(raw % 100));
+            first = false;
         }
         n += snprintf(json + n, sizeof(json) - n, "}");
         SendResponse(client, "application/json", json, true);
