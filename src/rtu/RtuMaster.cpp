@@ -180,7 +180,9 @@ namespace Rtu
         {
             return false;
         }
-        if (length == 8 && response[1] == (0x10 | 0x80))
+        // An RTU exception response is only 5 bytes (addr, 0x90, code, CRC);
+        // it must be counted even though it cannot be an echo frame
+        if (response[1] == (0x10 | 0x80))
         {
             ++mExceptionCount;
             return false;

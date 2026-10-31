@@ -387,6 +387,7 @@ namespace DeyeBridge
             "</style></head><body>"
             "<header><div class='wrap'><div><h1>DeyeBridge</h1>"
             "<p class='sub'>Deye Hybrid Inverter &middot; Modbus TCP + MQTT Bridge</p></div>"
+            "<span class='badge' id='rssi'>&ndash;</span>"
             "<span class='badge' id='conn'>&ndash;</span></div></header>"
             "<nav><div class='wrap'><a href='#live'>Live</a>"
             "<a href='#setup'>Setup</a><a href='#ota'>OTA</a></div></nav>"
@@ -493,7 +494,10 @@ namespace DeyeBridge
             "html+='<div class=\"tile\"><div class=\"k\">'+liveLabels[k]+'</div>"
             "<div class=\"v'+cls+'\">'+v+'</div></div>';}"
             "document.getElementById('livegrid').innerHTML=html;})"
-            ".catch(function(){document.getElementById('conn').textContent='offline';});}"
+            ".catch(function(){document.getElementById('conn').textContent='offline';});"
+            "fetch('/diag').then(function(r){return r.json();}).then(function(g){"
+            "document.getElementById('rssi').textContent=g.rssi+' dBm';})"
+            ".catch(function(){});}"
             "refreshLive();setInterval(refreshLive,5000);"
             "</script></body></html>",
             ssidEsc, passEsc, hostEsc, s.mqttPort, userEsc,

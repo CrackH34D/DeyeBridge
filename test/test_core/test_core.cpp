@@ -1,6 +1,10 @@
 #include <unity.h>
+#include <cstring>
+#include <cstdio>
 #include <core/WriteQueue.h>
 #include <core/RegisterCache.h>
+#include <core/ValueFormat.h>
+#include <Config.h>
 
 using DeyeBridge::RegisterCache;
 using DeyeBridge::WriteEntry;
@@ -57,10 +61,56 @@ void test_register_cache_store_get_valid()
     TEST_ASSERT_EQUAL(77, cache.Get(5));
 }
 
+void test_state_json_fits_mqtt_buffer()
+{
+    // Regression: the JSON state message must stay publishable on MQTT.
+    // PubSubClient rejects publish() when header + topic + payload exceed its
+    // buffer; with the old 768-byte buffer the {base}/state topic silently
+    // never carried data.
+    static RegisterCache cache(Config::RegisterSpaceEnd);
+
+    static uint16_t worst[Config::RegisterSpaceEnd];
+    for (size_t i = 0; i < Config::RegisterSpaceEnd; ++i)
+    {
+        worst[i] = 0xFFFF;
+    }
+    cache.Store(0, worst, Config::RegisterSpaceEnd);
+
+    // Per-entity worst cases on top of the all-ones baseline
+    for (size_t i = 0; i < DeyeRegisters::kSensorCount; ++i)
+    {
+        const DeyeRegisters::SensorEntity &e = DeyeRegisters::kSensors[i];
+        if (e.isDword)
+        {
+            cache.Poke(e.address, 0xFFFF);
+            cache.Poke(e.address + 1, 0x7FFF);   // +214748364.7, longest value
+        }
+        else if (e.isSigned)
+        {
+            cache.Poke(e.address, 0x8000);       // -32768
+        }
+    }
+
+    static char json[4096];
+    BuildStateJson(cache, json, sizeof(json));
+    const size_t length = strlen(json);
+    printf("      worst-case state JSON: %u bytes\n", static_cast<unsigned>(length));
+
+    TEST_ASSERT_TRUE(length > 0);
+    TEST_ASSERT_EQUAL('}', json[length - 1]);   // complete object, no truncation
+
+    // MQTT publish overhead: header (5) + topic length field (2) + topic
+    // (mBase up to 39 chars + "state"); keep 64 bytes of topic headroom
+    const size_t maxPayload = Config::MqttBufferBytes - 5 - 2 - 64;
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(static_cast<uint32_t>(maxPayload),
+                                     static_cast<uint32_t>(length));
+}
+
 int main()
 {
     UNITY_BEGIN();
     RUN_TEST(test_write_queue_fifo_and_mask);
     RUN_TEST(test_register_cache_store_get_valid);
+    RUN_TEST(test_state_json_fits_mqtt_buffer);
     return UNITY_END();
 }

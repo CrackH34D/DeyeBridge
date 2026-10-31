@@ -17,7 +17,7 @@ namespace DeyeBridge
 
         mClient.setClient(*mWifi);
         mClient.setServer(settings.mqttHost, settings.mqttPort);
-        mClient.setBufferSize(768);
+        mClient.setBufferSize(Config::MqttBufferBytes);
         mClient.setKeepAlive(30);
         mClient.setCallback([this](char *topic, byte *payload, unsigned int length) {
             HandleCommand(topic, payload, length);

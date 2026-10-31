@@ -99,6 +99,18 @@ def run_check() -> int:
     if missing_handler:
         failures.append(f"HTML fields without save handler: {missing_handler}")
 
+    # Regression guard: string settings must pass clearIfAbsent=false so a
+    # partial POST (curl, scripts) keeps the stored values instead of wiping
+    # WiFi/MQTT credentials and rebooting the device into the fallback AP.
+    string_fields = ["wifi_ssid", "wifi_pass", "mqtt_host", "mqtt_user",
+                     "mqtt_pass", "mqtt_client", "mqtt_base"]
+    for f in string_fields:
+        m = re.search(r'CopyFormField\(body, "%s", .*?, false\)' % f, source, re.DOTALL)
+        if not m:
+            failures.append(
+                f"String field {f} must be saved with clearIfAbsent=false "
+                "(partial-POST config-wipe regression)")
+
     missing_field = [f for f in handlers if f not in html]
     if missing_field:
         failures.append(f"Save handlers without HTML field: {missing_field}")
@@ -119,7 +131,8 @@ def run_check() -> int:
         failures.append(f"Unescaped % sequences in format string: {unescaped}")
 
     # The page must contain the key UI elements
-    for needle in ["otaUpload", "x.open('POST','/update')", "action='/save'", "'/values'"]:
+    for needle in ["otaUpload", "x.open('POST','/update')", "action='/save'", "'/values'",
+                   "id='rssi'", "fetch('/diag')"]:
         if needle not in rendered:
             failures.append(f"Missing UI element: {needle!r}")
 
@@ -159,6 +172,9 @@ class MockHandler(BaseHTTPRequestHandler):
                       '"grid_power":250,"grid_connected":true,"time_slot_1":"06:30",'
                       '"overall_state":"normal"}')
             self._send(200, values, "application/json")
+        elif self.path.startswith("/diag"):
+            self._send(200, '{"mqtt_connected":true,"rtu_sweeps":42,"rtu_errors":0,'
+                            '"rssi":-67,"uptime_ms":123456}', "application/json")
         else:
             self._send(200, MockHandler.page_html)
 

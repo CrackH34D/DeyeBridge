@@ -2,10 +2,15 @@
 
 // Firmware version, baked into MQTT discovery (sw_version) and the web footer.
 // Bump on every release; tools/deploy.sh reads it from here.
-#define FIRMWARE_VERSION "1.4.2"
+#define FIRMWARE_VERSION "1.4.3"
 
 namespace Config
 {
+    // PubSubClient packet buffer. The largest MQTT publish is the JSON state
+    // message (~1.7 kB with all 76 fields); with the default 768-byte buffer
+    // publish() silently failed and the {base}/state topic never carried data.
+    // test_core asserts the worst-case state JSON still fits.
+    constexpr size_t MqttBufferBytes = 3072;
     // RS485 / Modbus RTU (Deye hybrid inverter, slave 1, 9600 8N1)
     constexpr int RtuUartNum = 2;
     constexpr int RtuTxPin = 12;
