@@ -88,8 +88,37 @@ namespace DeyeBridge
                 }
 
                 uint8_t pdu[254];
-                if (static_cast<size_t>(length - 1) > sizeof(pdu) ||
-                    static_cast<size_t>(client.readBytes(pdu, length - 1)) < static_cast<size_t>(length - 1))
+                if (static_cast<size_t>(length - 1) > sizeof(pdu))
+                {
+                    DropClient(i);
+                    break;
+                }
+                const size_t want = static_cast<size_t>(length - 1);
+                const uint32_t frameStart = millis();
+                size_t got = 0;
+                while (got < want)
+                {
+                    const size_t avail = client.available();
+                    if (avail > 0)
+                    {
+                        const size_t chunk = avail < (want - got) ? avail : (want - got);
+                        const size_t read = client.readBytes(pdu + got, chunk);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+                        got += read;
+                    }
+                    else if (!client.connected() || millis() - frameStart > 2000)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        delay(1);
+                    }
+                }
+                if (got != want)
                 {
                     DropClient(i);
                     break;
@@ -137,7 +166,7 @@ namespace DeyeBridge
         switch (pdu[0])
         {
             case 0x03: return HandleReadHolding(pdu, pduLength, response);
-            case 0x04: return HandleReadInput(pdu, pduLength, response);
+            case 0x04: return HandleReadHolding(pdu, pduLength, response);
             case 0x06: return HandleWriteSingle(pdu, pduLength, response);
             case 0x10: return HandleWriteMultiple(pdu, pduLength, response);
             default:
@@ -173,14 +202,6 @@ namespace DeyeBridge
         return 2 + count * 2;
     }
 
-    size_t ModbusTcpServer::HandleReadInput(const uint8_t *pdu, size_t pduLength, uint8_t *response)
-    {
-        // The Deye map lives entirely in holding registers
-        (void)pdu;
-        (void)pduLength;
-        return BuildException(pdu[0], 0x01, response);
-    }
-
     size_t ModbusTcpServer::HandleWriteSingle(const uint8_t *pdu, size_t pduLength, uint8_t *response)
     {
         if (pduLength < 5)
@@ -196,7 +217,11 @@ namespace DeyeBridge
             return BuildException(pdu[0], 0x02, response);
         }
 
-        mQueue->Push(address, value, 0xFFFF);
+        if (!mQueue->Push(address, value, 0xFFFF))
+        {
+            Log::warn("Modbus TCP: write queue full, rejecting reg %u", address);
+            return BuildException(pdu[0], 0x04, response);
+        }
         mCache->Poke(address, value);
         Log::info("Modbus TCP: queued write reg %u = %u", address, value);
         // FC06 echoes the request
@@ -230,6 +255,12 @@ namespace DeyeBridge
                 Log::info("Modbus TCP: multi-write hits protected register %u, rejected", address);
                 return BuildException(pdu[0], 0x02, response);
             }
+        }
+
+        if (mQueue->Size() + count > WriteQueue::kCapacity)
+        {
+            Log::warn("Modbus TCP: write queue full, rejecting multi-write of %u", count);
+            return BuildException(pdu[0], 0x04, response);
         }
 
         for (uint16_t i = 0; i < count; ++i)

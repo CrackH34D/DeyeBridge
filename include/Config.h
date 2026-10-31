@@ -1,5 +1,9 @@
 #pragma once
 
+// Firmware version, baked into MQTT discovery (sw_version) and the web footer.
+// Bump on every release; tools/deploy.sh reads it from here.
+#define FIRMWARE_VERSION "1.4.2"
+
 namespace Config
 {
     // RS485 / Modbus RTU (Deye hybrid inverter, slave 1, 9600 8N1)

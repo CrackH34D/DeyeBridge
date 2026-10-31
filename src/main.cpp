@@ -95,6 +95,7 @@ void setup()
     delay(100);
 
     Log::info("DeyeBridge booting");
+    DeyeBridge::Watchdog::LogBootReason();
     Log::info("  Modbus TCP: port %u | MQTT + HA discovery | RTU slave %u",
               Config::TcpPort, Config::DeyeSlaveId);
 
@@ -105,6 +106,7 @@ void setup()
 
     // Web interface runs in every mode (AP fallback included)
     gWeb.Init(&gSettings, &gCache);
+    gWeb.AttachDiagnostics(&gMqtt, &gPoller, &gRtu);
 
     if (!WifiConnected())
     {

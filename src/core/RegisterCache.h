@@ -24,6 +24,7 @@ namespace DeyeBridge
 
         bool IsValid(uint16_t address) const;
         bool AllValid() const { return mValidCount > 0 && mValidCount == mSpaceEnd; }
+        uint32_t ValidCount() const { return mValidCount; }
 
         uint16_t SpaceEnd() const { return mSpaceEnd; }
 

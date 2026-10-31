@@ -1,19 +1,31 @@
 #include "Settings.h"
 #include "../util/Logging.h"
+#include <nvs_flash.h>
 
 namespace DeyeBridge
 {
+    static bool EnsureNvs()
+    {
+        const esp_err_t err = nvs_flash_init();
+        if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+        {
+            nvs_flash_erase();
+            return nvs_flash_init() == ESP_OK;
+        }
+        return err == ESP_OK;
+    }
+
     void SettingsStore::Begin()
     {
-        if (!mPrefs.begin("deye", false))
+        if (!EnsureNvs())
         {
-            Log::error("Settings: NVS open failed, using defaults");
+            Log::error("Settings: NVS init failed, using defaults");
         }
     }
 
     void SettingsStore::Load()
     {
-        if (!mPrefs.begin("deye", true))
+        if (!EnsureNvs() || !mPrefs.begin("deye", true))
         {
             Log::warn("Settings: NVS unreadable, keeping defaults");
             return;
@@ -53,7 +65,7 @@ namespace DeyeBridge
 
     bool SettingsStore::Save()
     {
-        if (!mPrefs.begin("deye", false))
+        if (!EnsureNvs() || !mPrefs.begin("deye", false))
         {
             return false;
         }

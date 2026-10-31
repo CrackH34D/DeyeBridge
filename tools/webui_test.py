@@ -42,7 +42,7 @@ SAMPLE_SETTINGS = {
 def extract_page_segment(source: str) -> str:
     """Extracts the config-page snprintf call (format string part)."""
     start = source.index('snprintf(page, sizeof(page),')
-    end = source.index('s.wifiSsid, s.wifiPassword,')
+    end = source.index('ssidEsc, passEsc,')
     return source[start:end]
 
 
@@ -78,6 +78,14 @@ def format_placeholders(text: str) -> list:
     return re.findall(r"%(?:s|u|lu|d|zu|i)", cleaned)
 
 
+def stray_percent(text: str) -> list:
+    """Finds any % that is neither a known specifier nor a %% escape.
+    Catches sequences like the SVG color code %23b45309, which printf would
+    parse as a (missing-argument) conversion and shift all arguments."""
+    stripped = re.sub(r"%%|%lu|%[sud]", "", text)
+    return re.findall(r"%", stripped)
+
+
 def run_check() -> int:
     source = SOURCE.read_text()
     page_text = joined_format_string(extract_page_segment(source))
@@ -105,6 +113,10 @@ def run_check() -> int:
     stray = format_placeholders(rendered)
     if stray:
         failures.append(f"Rendered page contains stray format specifiers: {stray}")
+
+    unescaped = stray_percent(page_text)
+    if unescaped:
+        failures.append(f"Unescaped % sequences in format string: {unescaped}")
 
     # The page must contain the key UI elements
     for needle in ["otaUpload", "x.open('POST','/update')", "action='/save'", "'/values'"]:

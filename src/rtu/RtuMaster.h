@@ -23,14 +23,29 @@ namespace Rtu
         bool WriteMultiple(uint8_t slave, uint16_t start, const uint16_t *values,
                            uint16_t count, uint32_t responseTimeoutMs);
 
+        // Error-class counters for remote diagnostics
+        uint32_t TimeoutCount() const { return mTimeoutCount; }
+        uint32_t CrcErrorCount() const { return mCrcErrorCount; }
+        uint32_t ExceptionCount() const { return mExceptionCount; }
+
     private:
+        enum class RxStatus
+        {
+            kOk,
+            kTimeout,
+            kCrc
+        };
+
         void SendFrame(const uint8_t *frame, size_t length);
-        // Reads a full response frame into frame/length. Returns false on
-        // timeout or CRC mismatch.
-        bool ReceiveFrame(uint8_t *frame, size_t &length, size_t expectedMax,
-                          uint32_t responseTimeoutMs);
+        // Reads a full response frame into frame/length. Returns the failure
+        // class so callers can count timeouts and CRC errors separately.
+        RxStatus ReceiveFrame(uint8_t *frame, size_t &length, size_t expectedMax,
+                              uint32_t responseTimeoutMs);
 
         HardwareSerial *mSerial = nullptr;
         int mDePin = -1;   // <= 0: auto-direction transceiver, no pin driven
+        uint32_t mTimeoutCount = 0;
+        uint32_t mCrcErrorCount = 0;
+        uint32_t mExceptionCount = 0;
     };
 }

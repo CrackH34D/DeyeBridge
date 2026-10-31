@@ -25,6 +25,9 @@ jobs:
       - name: Install PlatformIO
         run: pip install platformio
 
+      - name: Validate web UI source
+        run: python tools/webui_test.py check
+
       - name: Build firmware (ESP32-S3)
         run: pio run -e esp32s3
 

@@ -12,6 +12,9 @@ namespace DeyeBridge
         // Creates the watchdog task pinned to the opposite core
         void Start(uint32_t timeoutMs);
 
+        // Logs why the chip last restarted (watchdog, panic, power-on, ...)
+        void LogBootReason();
+
         // Called once per main loop iteration
         void NotifyLoopAlive();
 

@@ -5,7 +5,7 @@ namespace Rtu
 {
     void RtuMaster::Init(int uartNum, int txPin, int rxPin, int dePin, uint32_t baud)
     {
-        mSerial = (uartNum == 1) ? &Serial1 : (uartNum == 2 ? &Serial2 : &Serial);
+        mSerial = (uartNum == 1) ? &Serial1 : &Serial2;
         mDePin = dePin;
 
         // dePin <= 0 means auto-direction transceiver: no pin is driven
@@ -35,11 +35,12 @@ namespace Rtu
         if (mDePin > 0)
         {
             digitalWrite(mDePin, LOW);
+            delayMicroseconds(100);
         }
     }
 
-    bool RtuMaster::ReceiveFrame(uint8_t *frame, size_t &length, size_t expectedMax,
-                                 uint32_t responseTimeoutMs)
+    RtuMaster::RxStatus RtuMaster::ReceiveFrame(uint8_t *frame, size_t &length, size_t expectedMax,
+                                                uint32_t responseTimeoutMs)
     {
         const uint32_t deadline = millis() + responseTimeoutMs;
         size_t received = 0;
@@ -72,7 +73,8 @@ namespace Rtu
 
         if (received < 4)
         {
-            return false;
+            ++mTimeoutCount;
+            return RxStatus::kTimeout;
         }
 
         const uint16_t crc = Crc16(frame, received - 2);
@@ -80,11 +82,12 @@ namespace Rtu
                                      (static_cast<uint16_t>(frame[received - 1]) << 8);
         if (crc != receivedCrc)
         {
-            return false;
+            ++mCrcErrorCount;
+            return RxStatus::kCrc;
         }
 
         length = received;
-        return true;
+        return RxStatus::kOk;
     }
 
     bool RtuMaster::ReadHolding(uint8_t slave, uint16_t start, uint16_t count,
@@ -106,7 +109,7 @@ namespace Rtu
         uint8_t response[3 + 125 * 2 + 2];
         size_t length = 0;
         const size_t expectedMax = 5 + count * 2;
-        if (!ReceiveFrame(response, length, expectedMax, responseTimeoutMs))
+        if (ReceiveFrame(response, length, expectedMax, responseTimeoutMs) != RxStatus::kOk)
         {
             return false;
         }
@@ -117,6 +120,7 @@ namespace Rtu
         }
         if (response[1] == (0x03 | 0x80))
         {
+            ++mExceptionCount;
             return false;   // exception response
         }
         if (response[1] != 0x03 || length != expectedMax ||
@@ -136,29 +140,10 @@ namespace Rtu
     bool RtuMaster::WriteSingle(uint8_t slave, uint16_t reg, uint16_t value,
                                 uint32_t responseTimeoutMs)
     {
-        uint8_t frame[8];
-        frame[0] = slave;
-        frame[1] = 0x06;
-        frame[2] = static_cast<uint8_t>(reg >> 8);
-        frame[3] = static_cast<uint8_t>(reg & 0xFF);
-        frame[4] = static_cast<uint8_t>(value >> 8);
-        frame[5] = static_cast<uint8_t>(value & 0xFF);
-        const uint16_t crc = Crc16(frame, 6);
-        frame[6] = static_cast<uint8_t>(crc & 0xFF);
-        frame[7] = static_cast<uint8_t>(crc >> 8);
-
-        SendFrame(frame, 8);
-
-        uint8_t response[8];
-        size_t length = 0;
-        if (!ReceiveFrame(response, length, 8, responseTimeoutMs))
-        {
-            return false;
-        }
-        // An FC06 response echoes the request
-        return length == 8 && response[0] == slave && response[1] == 0x06 &&
-               response[2] == frame[2] && response[3] == frame[3] &&
-               response[4] == frame[4] && response[5] == frame[5];
+        // The Deye commits settings writes only via FC16 (the proven ESPHome
+        // config used use_write_multiple everywhere); FC06 is echoed but the
+        // internal settings management reverts the value seconds later
+        return WriteMultiple(slave, reg, &value, 1, responseTimeoutMs);
     }
 
     bool RtuMaster::WriteMultiple(uint8_t slave, uint16_t start, const uint16_t *values,
@@ -191,8 +176,13 @@ namespace Rtu
 
         uint8_t response[8];
         size_t length = 0;
-        if (!ReceiveFrame(response, length, 8, responseTimeoutMs))
+        if (ReceiveFrame(response, length, 8, responseTimeoutMs) != RxStatus::kOk)
         {
+            return false;
+        }
+        if (length == 8 && response[1] == (0x10 | 0x80))
+        {
+            ++mExceptionCount;
             return false;
         }
         return length == 8 && response[0] == slave && response[1] == 0x10 &&

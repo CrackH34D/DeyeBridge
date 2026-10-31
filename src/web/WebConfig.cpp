@@ -3,6 +3,9 @@
 #include "../util/Logging.h"
 #include "../util/Watchdog.h"
 #include "../core/ValueFormat.h"
+#include "../util/HtmlEscape.h"
+#include "../mqtt/MqttClient.h"
+#include "../rtu/DeyePoller.h"
 #include "../../include/Config.h"
 
 namespace DeyeBridge
@@ -16,6 +19,14 @@ namespace DeyeBridge
         mServer->setNoDelay(true);
     }
 
+    void WebConfig::AttachDiagnostics(const MqttClient *mqtt, const DeyePoller *poller,
+                                      const Rtu::RtuMaster *rtu)
+    {
+        mMqtt = mqtt;
+        mPoller = poller;
+        mRtu = rtu;
+    }
+
     void SendFull(WiFiClient &client, const char *contentType, const char *body)
     {
         client.printf("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
@@ -23,9 +34,8 @@ namespace DeyeBridge
         client.print(body);
     }
 
-    void WebConfig::SendResponse(WiFiClient &client, const char *contentType, const char *body, bool close)
+    void WebConfig::SendResponse(WiFiClient &client, const char *contentType, const char *body)
     {
-        (void)close;
         SendFull(client, contentType, body);
     }
 
@@ -44,7 +54,8 @@ namespace DeyeBridge
 
     void WebConfig::ServeClient(WiFiClient &client)
     {
-        client.setTimeout(2000);
+        client.setTimeout(2);
+        const uint32_t startMs = millis();
 
         char requestLine[128];
         if (!client.readBytesUntil('\n', requestLine, sizeof(requestLine) - 1))
@@ -56,8 +67,13 @@ namespace DeyeBridge
         // Drain headers, note content length
         size_t contentLength = 0;
         char line[128];
+        size_t headerLines = 0;
         for (;;)
         {
+            if (millis() - startMs > 3000 || ++headerLines > 32)
+            {
+                return;
+            }
             if (!client.readBytesUntil('\n', line, sizeof(line) - 1))
             {
                 break;
@@ -73,13 +89,12 @@ namespace DeyeBridge
             }
         }
 
-        if (contentLength > 2048)
-        {
-            contentLength = 2048;
-        }
-
         if (strncmp(requestLine, "POST /save", 10) == 0)
         {
+            if (contentLength > 2048)
+            {
+                contentLength = 2048;
+            }
             char body[2049] = {};
             const size_t got = client.readBytes(body, contentLength);
             body[got] = '\0';
@@ -96,6 +111,18 @@ namespace DeyeBridge
         if (strncmp(requestLine, "GET /values", 11) == 0)
         {
             ServeValues(client);
+            return;
+        }
+
+        if (strncmp(requestLine, "GET /scan", 9) == 0)
+        {
+            ServeScan(client);
+            return;
+        }
+
+        if (strncmp(requestLine, "GET /diag", 9) == 0)
+        {
+            ServeDiag(client);
             return;
         }
 
@@ -181,65 +208,90 @@ namespace DeyeBridge
 
     void WebConfig::ServeValues(WiFiClient &client)
     {
-        char json[1536];
-        size_t n = 0;
-        n += snprintf(json + n, sizeof(json) - n, "{");
-        bool first = true;
+        static char json[4096];
+        BuildStateJson(*mCache, json, sizeof(json));
+        SendResponse(client, "application/json", json);
+    }
 
-        char value[24];
-        for (size_t i = 0; i < DeyeRegisters::kSensorCount; ++i)
+    static void JsonEscape(const char *src, char *out, size_t size)
+    {
+        if (size == 0)
         {
-            const DeyeRegisters::SensorEntity &e = DeyeRegisters::kSensors[i];
-            if (!mCache->IsValid(e.address))
+            return;
+        }
+        size_t o = 0;
+        for (const char *p = src; *p != '\0' && o + 1 < size; ++p)
+        {
+            const unsigned char c = static_cast<unsigned char>(*p);
+            if (c == '"' || c == '\\')
             {
+                if (o + 2 >= size)
+                {
+                    break;
+                }
+                out[o++] = '\\';
+                out[o++] = *p;
                 continue;
             }
-            const float v = EntityValue(e, *mCache);
-            snprintf(value, sizeof(value), "%.*f", EntityDecimals(e), v);
-            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":%s", first ? "" : ",", e.key, value);
-            first = false;
-        }
-        if (mCache->IsValid(672))
-        {
-            const int32_t total = static_cast<int32_t>(mCache->Get(672)) +
-                                  mCache->Get(673) + mCache->Get(674) + mCache->Get(675);
-            n += snprintf(json + n, sizeof(json) - n, "%s\"pv_total_power\":%ld",
-                          first ? "" : ",", static_cast<long>(total));
-            first = false;
-        }
-        if (mCache->IsValid(500))
-        {
-            n += snprintf(json + n, sizeof(json) - n, "%s\"overall_state\":\"%s\"",
-                          first ? "" : ",", DeyeRegisters::OverallStateName(mCache->Get(500)));
-            first = false;
-        }
-        for (size_t i = 0; i < DeyeRegisters::kBinaryCount; ++i)
-        {
-            const DeyeRegisters::BinaryEntity &e = DeyeRegisters::kBinaries[i];
-            if (!mCache->IsValid(e.address))
+            if (c < 0x20)
             {
+                if (o + 6 >= size)
+                {
+                    break;
+                }
+                snprintf(out + o, 7, "\\u%04x", c);
+                o += 6;
                 continue;
             }
-            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":%s",
-                          first ? "" : ",", e.key,
-                          mCache->Get(e.address) ? "true" : "false");
-            first = false;
+            out[o++] = *p;
         }
-        for (size_t i = 0; i < DeyeRegisters::kTimeSlotCount; ++i)
+        out[o] = '\0';
+    }
+
+    void WebConfig::ServeScan(WiFiClient &client)
+    {        WiFi.mode(WIFI_AP_STA);
+        const int found = WiFi.scanNetworks();
+        if (found < 0)
         {
-            const DeyeRegisters::TextEntity &e = DeyeRegisters::kTimeSlots[i];
-            if (!mCache->IsValid(e.address))
-            {
-                continue;
-            }
-            const uint16_t raw = mCache->Get(e.address);
-            n += snprintf(json + n, sizeof(json) - n, "%s\"%s\":\"%02u:%02u\"",
-                          first ? "" : ",", e.key,
-                          static_cast<unsigned>(raw / 100), static_cast<unsigned>(raw % 100));
-            first = false;
+            Log::warn("Web: WiFi scan failed (err %d)", found);
         }
-        n += snprintf(json + n, sizeof(json) - n, "}");
-        SendResponse(client, "application/json", json, true);
+        static char json[8192];
+        size_t n = 0;
+        Util::StrAppend(json, sizeof(json), n, "[");
+        for (int i = 0; i < found; ++i)
+        {
+            char ssid[33];
+            JsonEscape(WiFi.SSID(i).c_str(), ssid, sizeof(ssid));
+            if (n + 130 > sizeof(json) - 1)
+            {
+                break;
+            }
+            Util::StrAppend(json, sizeof(json), n, "%s{\"ssid\":\"%s\",\"rssi\":%d,\"secure\":%s}",
+                            i ? "," : "", ssid, WiFi.RSSI(i),
+                            WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false");
+        }
+        Util::StrAppend(json, sizeof(json), n, "]");
+        WiFi.scanDelete();
+        SendResponse(client, "application/json", json);
+    }
+
+    void WebConfig::ServeDiag(WiFiClient &client)
+    {
+        char json[320];
+        snprintf(json, sizeof(json),
+                 "{\"mqtt_connected\":%s,\"rtu_sweeps\":%u,\"rtu_errors\":%u,"
+                 "\"rtu_timeouts\":%u,\"rtu_crc\":%u,\"rtu_exceptions\":%u,"
+                 "\"valid_registers\":%u,\"rssi\":%d,\"uptime_ms\":%lu}",
+                 (mMqtt && mMqtt->Connected()) ? "true" : "false",
+                 mPoller ? static_cast<unsigned>(mPoller->SweepCount()) : 0,
+                 mPoller ? static_cast<unsigned>(mPoller->ErrorCount()) : 0,
+                 mRtu ? static_cast<unsigned>(mRtu->TimeoutCount()) : 0,
+                 mRtu ? static_cast<unsigned>(mRtu->CrcErrorCount()) : 0,
+                 mRtu ? static_cast<unsigned>(mRtu->ExceptionCount()) : 0,
+                 mCache ? static_cast<unsigned>(mCache->ValidCount()) : 0,
+                 WiFi.RSSI(),
+                 static_cast<unsigned long>(millis()));
+        SendResponse(client, "application/json", json);
     }
 
     void WebConfig::ServeConfigPage(WiFiClient &client)
@@ -254,11 +306,26 @@ namespace DeyeBridge
             snprintf(dePinText, sizeof(dePinText), "%d", s.rtuDePin);
         }
 
-        char page[16384];
+        char ssidEsc[sizeof(s.wifiSsid) * 6];
+        char passEsc[sizeof(s.wifiPassword) * 6];
+        char hostEsc[sizeof(s.mqttHost) * 6];
+        char userEsc[sizeof(s.mqttUser) * 6];
+        char pass2Esc[sizeof(s.mqttPassword) * 6];
+        char clientEsc[sizeof(s.mqttClientId) * 6];
+        char baseEsc[sizeof(s.mqttBaseTopic) * 6];
+        Util::HtmlEscape(s.wifiSsid, ssidEsc, sizeof(ssidEsc));
+        Util::HtmlEscape(s.wifiPassword, passEsc, sizeof(passEsc));
+        Util::HtmlEscape(s.mqttHost, hostEsc, sizeof(hostEsc));
+        Util::HtmlEscape(s.mqttUser, userEsc, sizeof(userEsc));
+        Util::HtmlEscape(s.mqttPassword, pass2Esc, sizeof(pass2Esc));
+        Util::HtmlEscape(s.mqttClientId, clientEsc, sizeof(clientEsc));
+        Util::HtmlEscape(s.mqttBaseTopic, baseEsc, sizeof(baseEsc));
+
+        static char page[16384];
         int n = snprintf(page, sizeof(page),
             "<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23b45309'/><path d='M36 8L18 36h12l-4 20 20-28H32l4-20z' fill='%23ffffff'/></svg>\">"
+            "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%%23b45309'/><path d='M36 8L18 36h12l-4 20 20-28H32l4-20z' fill='%%23ffffff'/></svg>\">"
             "<title>DeyeBridge</title><style>"
             ":root{--bg:#f6f7f4;--card:#ffffff;--text:#111827;--muted:#6b7280;"
             "--accent:#b45309;--accent2:#d97706;--accent-soft:#fdf0dd;--ok:#15803d;"
@@ -306,6 +373,13 @@ namespace DeyeBridge
             "transition:filter .15s,transform .05s}"
             "button:hover{filter:brightness(1.1)}"
             "button:active{transform:scale(.98)}"
+            ".netlist{margin-top:.5rem;display:grid;gap:.4rem}"
+            ".netlist button{display:block;width:100%%;text-align:left;background:var(--card);"
+            "color:var(--text);border:1px solid var(--border);border-radius:10px;"
+            "padding:.6rem .8rem;font-size:.85rem;font-weight:600}"
+            ".netlist button:hover{border-color:var(--accent)}"
+            ".netlist button:active{transform:none;background:var(--accent-soft)}"
+            "#scanstatus{display:block}"
             ".hint{font-size:.77rem;color:var(--muted);margin:.4rem 0 0;line-height:1.45}"
             "#otastatus{font-weight:700;min-height:1.2em;margin:.6rem 0 0}"
             "footer{text-align:center;color:var(--muted);font-size:.75rem;padding:2rem 0}"
@@ -331,6 +405,9 @@ namespace DeyeBridge
             "<input type='text' name='wifi_ssid' value='%s'></div>"
             "<div class='field'><label>Password</label>"
             "<input type='password' name='wifi_pass' value='%s'></div></div>"
+            "<div class='field'><button type='button' onclick='wifiScan()'>WLAN-Scan</button>"
+            "<span id='scanstatus' class='hint'></span></div>"
+            "<div id='nets' class='netlist'></div>"
 
             "<h2><svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='2'/><path d='M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14'/></svg>"
             "MQTT</h2>"
@@ -381,7 +458,7 @@ namespace DeyeBridge
             "<button onclick='otaUpload()'>Upload</button>"
             "<p id='otastatus'></p></div>"
 
-            "<footer>DeyeBridge v1.0.0</footer></div>"
+            "<footer>DeyeBridge v" FIRMWARE_VERSION "</footer></div>"
             "<script>"
             "function otaUpload(){"
             "var f=document.getElementById('fwfile').files[0];"
@@ -392,9 +469,21 @@ namespace DeyeBridge
             "x.onload=function(){s.textContent=x.responseText;};"
             "x.onerror=function(){s.textContent='Upload fehlgeschlagen (Verbindung verloren)';};"
             "x.send(f);}"
-            "var liveLabels={pv_total_power:'PV Total (W)',battery_soc:'Batterie (%)',"
+            "function wifiScan(){"
+            "var s=document.getElementById('scanstatus');s.textContent='Scan laeuft...';"
+            "var dl=document.getElementById('nets');dl.innerHTML='';"
+            "fetch('/scan').then(function(r){return r.json();}).then(function(l){"
+            "l.forEach(function(n){"
+            "if(!n.ssid){return;}"
+            "var b=document.createElement('button');b.type='button';"
+            "b.textContent=n.ssid+' - '+n.rssi+' dBm'+(n.secure?', gesichert':'');"
+            "b.onclick=function(){document.getElementsByName('wifi_ssid')[0].value=n.ssid;};"
+            "dl.appendChild(b);});"
+            "s.textContent=l.length+' Netze gefunden';})"
+            ".catch(function(){s.textContent='Scan fehlgeschlagen';});}"
+            "var liveLabels={solar_power:'PV Total (W)',battery_soc:'Batterie (%%)',"
             "battery_power:'Batterie (W)',grid_power:'Netz (W)',load_power:'Verbrauch (W)',"
-            "inverter_power:'WR (W)',overall_state:'Status',grid_connected:'Netz verbunden'};"
+            "inverter_power:'WR (W)',overall_state:'Status',grid_connected_status:'Netz verbunden'};"
             "function refreshLive(){"
             "fetch('/values').then(function(r){return r.json();}).then(function(d){"
             "document.getElementById('conn').textContent='live';"
@@ -407,14 +496,14 @@ namespace DeyeBridge
             ".catch(function(){document.getElementById('conn').textContent='offline';});}"
             "refreshLive();setInterval(refreshLive,5000);"
             "</script></body></html>",
-            s.wifiSsid, s.wifiPassword, s.mqttHost, s.mqttPort, s.mqttUser,
-            s.mqttPassword, s.mqttClientId, s.mqttBaseTopic,
+            ssidEsc, passEsc, hostEsc, s.mqttPort, userEsc,
+            pass2Esc, clientEsc, baseEsc,
             s.slaveId, static_cast<unsigned long>(s.rtuBaud),
             s.rtuTxPin, s.rtuRxPin, dePinText,
             static_cast<unsigned long>(s.pollIntervalMs),
             static_cast<unsigned long>(s.publishIntervalMs));
 
-        SendResponse(client, "text/html", page, true);
+        SendResponse(client, "text/html", page);
     }
 
     // Minimal URL decoding: %XX and '+' to space
@@ -441,9 +530,15 @@ namespace DeyeBridge
         *out = '\0';
     }
 
-    static void CopyFormField(const char *body, const char *field, char *out, size_t size)
+    static void CopyFormField(const char *body, const char *field, char *out, size_t size,
+                              bool clearIfAbsent = true)
     {
-        out[0] = '\0';
+        // Absent field: leave the current value untouched unless the caller
+        // explicitly wants a clear (numeric buffers rely on the clear to skip)
+        if (clearIfAbsent)
+        {
+            out[0] = '\0';
+        }
         const size_t fieldLength = strlen(field);
         const char *p = body;
         while ((p = strstr(p, field)) != nullptr)
@@ -465,43 +560,66 @@ namespace DeyeBridge
         }
     }
 
+    static long ParseInRange(const char *text, long minValue, long maxValue)
+    {
+        const long value = atol(text);
+        return value < minValue ? minValue : (value > maxValue ? maxValue : value);
+    }
+
     void WebConfig::HandleSave(WiFiClient &client, const char *body)
     {
         Settings &s = mStore->Get();
 
-        CopyFormField(body, "wifi_ssid", s.wifiSsid, sizeof(s.wifiSsid));
-        CopyFormField(body, "wifi_pass", s.wifiPassword, sizeof(s.wifiPassword));
-        CopyFormField(body, "mqtt_host", s.mqttHost, sizeof(s.mqttHost));
-        CopyFormField(body, "mqtt_user", s.mqttUser, sizeof(s.mqttUser));
-        CopyFormField(body, "mqtt_pass", s.mqttPassword, sizeof(s.mqttPassword));
-        CopyFormField(body, "mqtt_client", s.mqttClientId, sizeof(s.mqttClientId));
-        CopyFormField(body, "mqtt_base", s.mqttBaseTopic, sizeof(s.mqttBaseTopic));
+        CopyFormField(body, "wifi_ssid", s.wifiSsid, sizeof(s.wifiSsid), false);
+        CopyFormField(body, "wifi_pass", s.wifiPassword, sizeof(s.wifiPassword), false);
+        CopyFormField(body, "mqtt_host", s.mqttHost, sizeof(s.mqttHost), false);
+        CopyFormField(body, "mqtt_user", s.mqttUser, sizeof(s.mqttUser), false);
+        CopyFormField(body, "mqtt_pass", s.mqttPassword, sizeof(s.mqttPassword), false);
+        CopyFormField(body, "mqtt_client", s.mqttClientId, sizeof(s.mqttClientId), false);
+        CopyFormField(body, "mqtt_base", s.mqttBaseTopic, sizeof(s.mqttBaseTopic), false);
 
         char buffer[16];
         CopyFormField(body, "mqtt_port", buffer, sizeof(buffer));
-        if (buffer[0]) { s.mqttPort = static_cast<uint16_t>(atoi(buffer)); }
+        if (buffer[0]) { s.mqttPort = static_cast<uint16_t>(ParseInRange(buffer, 1, 65535)); }
         CopyFormField(body, "slave_id", buffer, sizeof(buffer));
-        if (buffer[0]) { s.slaveId = static_cast<uint8_t>(atoi(buffer)); }
+        if (buffer[0]) { s.slaveId = static_cast<uint8_t>(ParseInRange(buffer, 1, 247)); }
         CopyFormField(body, "rtu_baud", buffer, sizeof(buffer));
-        if (buffer[0]) { s.rtuBaud = static_cast<uint32_t>(atol(buffer)); }
+        if (buffer[0]) { s.rtuBaud = static_cast<uint32_t>(ParseInRange(buffer, 1200, 115200)); }
         CopyFormField(body, "rtu_tx", buffer, sizeof(buffer));
-        if (buffer[0]) { s.rtuTxPin = atoi(buffer); }
+        if (buffer[0]) { s.rtuTxPin = static_cast<int>(ParseInRange(buffer, 0, 48)); }
         CopyFormField(body, "rtu_rx", buffer, sizeof(buffer));
-        if (buffer[0]) { s.rtuRxPin = atoi(buffer); }
+        if (buffer[0]) { s.rtuRxPin = static_cast<int>(ParseInRange(buffer, 0, 48)); }
         CopyFormField(body, "rtu_de", buffer, sizeof(buffer));
         // Empty or 0 = auto-direction transceiver (no DE pin)
-        s.rtuDePin = buffer[0] ? atoi(buffer) : -1;
+        s.rtuDePin = buffer[0] ? static_cast<int>(ParseInRange(buffer, 0, 48)) : -1;
         CopyFormField(body, "poll_ms", buffer, sizeof(buffer));
-        if (buffer[0]) { s.pollIntervalMs = static_cast<uint32_t>(atol(buffer)); }
+        if (buffer[0]) { s.pollIntervalMs = static_cast<uint32_t>(ParseInRange(buffer, 250, 600000)); }
         CopyFormField(body, "pub_ms", buffer, sizeof(buffer));
-        if (buffer[0]) { s.publishIntervalMs = static_cast<uint32_t>(atol(buffer)); }
+        if (buffer[0]) { s.publishIntervalMs = static_cast<uint32_t>(ParseInRange(buffer, 500, 3600000)); }
 
-        char response[192];
+        static char response[1400];
         if (mStore->Save())
         {
+            // Poll /diag until the device is back after the restart, then jump
+            // to the main page; a static redirect would fire while the device
+            // is still rebooting and strand the browser on /save
             snprintf(response, sizeof(response),
                      "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                     "<html><body><p>Saved. Rebooting in 3 seconds...</p></body></html>");
+                     "<html><head><meta charset='utf-8'>"
+                     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                     "<style>body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;"
+                     "display:grid;place-items:center;min-height:100vh;margin:0}main{text-align:center;padding:2rem}"
+                     "a{color:#e0863a}</style></head><body><main><h2>Gespeichert</h2>"
+                     "<p id='st'>Geraet startet neu ...</p>"
+                     "<p><a href='/'>Direkt zur Startseite</a></p>"
+                     "<script>var t=0;var iv=setInterval(function(){"
+                     "fetch('/diag').then(function(){clearInterval(iv);location.replace('/');})"
+                     ".catch(function(){t++;document.getElementById('st').textContent="
+                     "'Geraet startet neu ('+t+' s) ...';"
+                     "if(t>=20){document.getElementById('st').textContent="
+                     "'Noch nicht erreichbar. Falls das WLAN geaendert wurde: neues Netz waehlen "
+                     "und die IP der Bridge aufrufen.';}});},1000);</script>"
+                     "</main></body></html>");
             client.print(response);
             client.flush();
             delay(1000);

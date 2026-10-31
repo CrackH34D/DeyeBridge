@@ -161,11 +161,12 @@ namespace DeyeRegisters
         {"grid_voltage_l1",   "Grid L1 Voltage",   598, 0.1,  0, "V",  "voltage", "measurement", false, false},
         {"grid_voltage_l2",   "Grid L2 Voltage",   599, 0.1,  0, "V",  "voltage", "measurement", false, false},
         {"grid_voltage_l3",   "Grid L3 Voltage",   600, 0.1,  0, "V",  "voltage", "measurement", false, false},
+        {"grid_voltage",      "Grid Voltage",      600, 0.1,  0, "V",  "voltage", "measurement", false, false},
         {"grid_current_l1",   "Grid L1 Current",   610, 0.01, 0, "A",  "current", "measurement", true,  false},
         {"grid_current_l2",   "Grid L2 Current",   611, 0.01, 0, "A",  "current", "measurement", true,  false},
         {"grid_current_l3",   "Grid L3 Current",   612, 0.01, 0, "A",  "current", "measurement", true,  false},
         {"grid_frequency",    "Grid Frequency",    609, 0.01, 0, "Hz", nullptr,   "measurement", false, false},
-        {"ct_power",          "Grid CT Power",     619, 1,    0, "W",  "power",   "measurement", true,  false},
+        {"grid_ct_power",     "Grid CT Power",     619, 1,    0, "W",  "power",   "measurement", true,  false},
 
         // Inverter
         {"inverter_power",     "Inverter Power",     636, 1,    0,     "W",  "power",   "measurement", true,  false},
@@ -219,7 +220,7 @@ namespace DeyeRegisters
     // ---- Binary sensors ---------------------------------------------------------
 
     constexpr BinaryEntity kBinaries[] = {
-        {"grid_connected", "Grid Connected Status", 552},
+        {"grid_connected_status", "Grid Connected Status", 552},
     };
 
     constexpr size_t kBinaryCount = sizeof(kBinaries) / sizeof(kBinaries[0]);
@@ -258,8 +259,8 @@ namespace DeyeRegisters
         {"battery_max_charge_current",         "Battery Max Charge Current",   108, 1,   "A",  0,     210,   5,   false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:battery-arrow-up"},
         {"battery_max_discharge_current",      "Battery Max Discharge Current",109, 1,   "A",  0,     210,   5,   false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:battery-arrow-down"},
         {"grid_charge_start_soc",              "Grid Charge Start SOC",        127, 1,   "%",  0,     100,   1,   false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:battery-charging-medium"},
-        {"grid_charge_current",                "Grid Charge Current",          128, 1,   "A",  0,     210,   5,   false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:battery-charging"},
-        {"max_sell_power",                     "Max Sell Power",               143, 1,   "W",  0,     12000, 100, false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:solar-power"},
+        {"grid_charge_battery_current",        "Grid Charge Battery Current",  128, 1,   "A",  0,     210,   5,   false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:battery-charging"},
+        {"max_sell_power",                     "Max Sell Power",               143, 1,   "W",  0,     10000, 500, false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:solar-power"},
         {"system_mode_power_time1",            "System Mode Power Time 1",     154, 1,   "W",  0,     12000, 100, false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:clock-outline"},
         {"system_mode_power_time2",            "System Mode Power Time 2",     155, 1,   "W",  0,     12000, 100, false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:clock-outline"},
         {"system_mode_power_time3",            "System Mode Power Time 3",     156, 1,   "W",  0,     12000, 100, false, 0, 0, false, nullptr, 0, false, 0xFFFF, "mdi:clock-outline"},
@@ -281,14 +282,14 @@ namespace DeyeRegisters
 
         // Switches (masked bit writes, see clearMask)
         {"toggle_on_off",       "Inverter ON/OFF",       80,  1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:power"},
-        {"solar_sell",          "Solar Sell",            145, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:transmission-tower-export"},
-        {"time_of_use",         "Time of Use",           146, 1, nullptr, 0, 1, 1, true, 0x00FF, 0, false, nullptr, 0, false, 0x00FF, "mdi:clock-outline"},
-        {"grid_charge_time1",   "Grid Charge Time 1",    172, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
-        {"grid_charge_time2",   "Grid Charge Time 2",    173, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
-        {"grid_charge_time3",   "Grid Charge Time 3",    174, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
-        {"grid_charge_time4",   "Grid Charge Time 4",    175, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
-        {"grid_charge_time5",   "Grid Charge Time 5",    176, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
-        {"grid_charge_time6",   "Grid Charge Time 6",    177, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"toggle_solar_sell",   "Solar Sell",            145, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:transmission-tower-export"},
+        {"toggle_system_timer", "Time of Use",           146, 1, nullptr, 0, 1, 1, true, 0x00FF, 0, false, nullptr, 0, false, 0x00FF, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time1", "Grid Charge Time 1", 172, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time2", "Grid Charge Time 2", 173, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time3", "Grid Charge Time 3", 174, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time4", "Grid Charge Time 4", 175, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time5", "Grid Charge Time 5", 176, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
+        {"system_mode_grid_charge_time6", "Grid Charge Time 6", 177, 1, nullptr, 0, 1, 1, true, 1,     0, false, nullptr, 0, false, 0x0001, "mdi:clock-outline"},
 
         // Selects
         {"energy_pattern", "Energy Pattern", 141, 1, nullptr, 0, 1, 1, false, 0, 0, true, kEnergyPatternOptions, 2, false, 0xFFFF, "mdi:swap-horizontal"},
