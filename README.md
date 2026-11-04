@@ -1,55 +1,56 @@
 # DeyeBridge
 
-ESP32-Firmware, die einen **Deye/Sunsynk Hybrid-Wechselrichter** (Modbus RTU/RS485) als **einzelner Master** ausliest und die Werte gleichzeitig an drei Konsumenten weiterreicht:
+Deutsch | **English** ([README.de.md](README.de.md))
 
-1. **evcc** – über einen nativen **Modbus-TCP-Server** (Port 502, Pass-Through des Deye-Register-Maps). Damit funktioniert das evcc-Template `deye-hybrid-3p` direkt – inklusive **Batteriesteuerung** (Normal/Hold/Netzladung) und **Einspeisebegrenzung (Curtailment)**.
-2. **Home Assistant** – über MQTT mit Auto-Discovery (Sensoren, Number-/Switch-Entities für Steuerung).
-3. **Beliebig** – über die kompakte JSON-State-Message und den HTTP-Endpunkt `/values`.
+---
 
-Das Besondere: **evcc und Home Assistant können parallel steuern.** Alle Schreibzugriffe (Modbus TCP FC06/FC16 und MQTT-Command-Topics) landen in derselben Write-Queue, die der RTU-Master priorisiert zwischen den Poll-Zyklen an den Wechselrichter schickt.
+ESP32 firmware that reads **Deye and Sunsynk hybrid inverters** (Modbus RTU/RS485; Sunsynk uses the same register map) as a **single master** and forwards the values simultaneously to three consumers:
+
+1. **evcc** – via a native **Modbus TCP server** (port 502, pass-through of the Deye/Sunsynk register map). This makes the evcc template `deye-hybrid-3p` work out of the box – including **battery control** (Normal/Hold/Grid charging) and **feed-in limiting (curtailment)**.
+2. **Home Assistant** – via MQTT with auto-discovery (sensors, number/switch entities for control).
+3. **Anything else** – via the compact JSON state message and the HTTP endpoint `/values`.
+
+The special part: **evcc and Home Assistant can control in parallel.** All write requests (Modbus TCP FC06/FC16 and MQTT command topics) go into the same write queue, which the RTU master sends to the inverter with priority between poll cycles.
 
 ---
 
 ## Features
 
-- Eigener Modbus-RTU-Master (FC03/06/16, CRC16, DE/RE-Steuerung) – keine fremden Modbus-Libraries
-- Modbus-TCP-Server als 1:1-Register-Pass-Through aus dem RAM-Cache (Block-Reads wie `588/38` werden in Millisekunden beantwortet)
-- Schreib-Whitelist: nur die Steuerregister des Wechselrichters sind beschreibbar (109, 127, 128, 130, 143, 145, 146, 154–171), alles andere wird mit `ILLEGAL DATA ADDRESS` abgelehnt
-- MQTT: Einzelwerte, JSON-State, HA-Discovery (Sensoren + Number/Switch-Steuer-Entities), Command-Topics, LWT-Status
-- Web-Setup (`http://<ip>/` oder Fallback-AP `DeyeBridge-Setup` / Passwort `deye12345`): WiFi, MQTT, RTU-Pins/Baudrate/Slave-ID, Intervalle; Live-Daten unter `/values`
-- **OTA-Update** über das Web-UI: `.bin`-Datei hochladen, Gerät rebootet nach Erfolg (Watchdog wird während des Uploads pausiert)
-- Hardware-Watchdog (restartet bei hängendem Haupt-Loop)
+- Own Modbus RTU master (FC03/06/16, CRC16, DE/RE control) – no third-party Modbus libraries
+- Modbus TCP server as a 1:1 register pass-through from the RAM cache (block reads like `588/38` are answered in milliseconds)
+- Write whitelist: only the inverter's control registers are writable (109, 127, 128, 130, 143, 145, 146, 154–171); everything else is rejected with `ILLEGAL DATA ADDRESS`
+- MQTT: individual values, JSON state, HA discovery (sensors + number/switch control entities), command topics, LWT status
+- Web setup (`http://<ip>/` or fallback AP `DeyeBridge-Setup` / password `deye12345`): WiFi, MQTT, RTU pins/baud rate/slave ID, intervals; live data at `/values`
+- **OTA update** via the web UI: upload a `.bin` file, the device reboots after success (watchdog is paused during the upload)
+- Hardware watchdog (restarts on a hung main loop)
 
 ## Hardware
 
-- ESP32-S3 (z. B. DevKitC-1) + MAX485-Modul (oder Transceiver mit Auto-Direction, dann DE-Pin leer lassen)
-- Standard-Pinbelegung (im Web-UI änderbar):
+- ESP32-S3 (e.g. DevKitC-1) + MAX485 module (or a transceiver with auto-direction; leave the DE pin unconnected in that case)
+- Standard pinout (changeable in the web UI):
 
 | MAX485 | ESP32-S3 |
 |--------|----------|
 | DI (TXD) | GPIO 12 |
 | RO (RXD) | GPIO 11 |
 | DE+RE | GPIO 18 |
-| A/B | Deye COM-Port RS485 |
-| GND | gemeinsam mit Deye-GND |
+| A/B | Deye/Sunsynk COM port RS485 |
+| GND | shared with inverter GND |
 
-## Firmware bauen & flashen
+## Building & flashing the firmware
 
 ```sh
-pio run -t upload          # flashen
-pio device monitor         # Serial-Log, 115200 baud
-pio run                    # nur bauen
-pio test -e native         # Host-Unit-Tests (CRC16, Queue, Registerplan)
+pio run -t upload          # flash
+pio device monitor         # serial log, 115200 baud
+pio run                    # build only
+pio test -e native         # host unit tests (CRC16, queue, register map)
 ```
 
-Erstflash über USB. Danach Updates bequem über das Web-UI: Firmware-Release
-(`.bin`) unter **OTA Update** hochladen – das Gerät schreibt die neue Firmware
-in die zweite App-Partition und rebootet (bei Fehlschlag bleibt die alte
-Firmware aktiv).
+Initial flashing via USB. After that, updates are easy through the web UI: upload the firmware release (`.bin`) under **OTA Update** – the device writes the new firmware to the second app partition and reboots (on failure, the old firmware stays active).
 
-## evcc anbinden
+## Connecting evcc
 
-Das Gerät ist ein ganz normaler Deye-Wechselrichter im Netz – evcc fragt nichts weiter ab als Register (siehe [docs/evcc.md](docs/evcc.md)):
+To the network, the device is just a normal Deye/Sunsynk inverter – evcc only queries registers (see [docs/evcc.md](docs/evcc.md), in German):
 
 ```yaml
 meters:
@@ -57,50 +58,46 @@ meters:
     type: template
     template: deye-hybrid-3p
     usage: grid
-    modbus: tcpip          # Host: IP des ESP, Port 502
+    modbus: tcpip          # host: IP of the ESP, port 502
     id: 1
     maxacpower: 12000
     batterytype: lv
 ```
 
-## Home Assistant anbinden
+## Connecting Home Assistant
 
-MQTT-Integration aktivieren, Broker-Verbindung im DeyeBridge-Web-UI eintragen – fertig. Alle Entities erscheinen automatisch (siehe [docs/homeassistant.md](docs/homeassistant.md)).
+Enable the MQTT integration, enter the broker connection in the DeyeBridge web UI – done. All entities appear automatically (see [docs/homeassistant.md](docs/homeassistant.md), in German).
 
-## Architektur
+## Architecture
 
 ```text
-                    +-------------------------------------------+
- Deye WR (RS485) <--+  RTU-Master: Block-Polling -> RegisterCache |
-                    |       ^                                    |
-                    |       | Write-Queue (priorisiert)          |
-                    |       v                                    |
-                    |  Modbus TCP :502   MQTT (PubSubClient)     |
-                    +-------+---------------------+--------------+
-                            |                     |
-                        evcc (nativ)      Home Assistant
-                        deye-hybrid-3p    (Discovery + Commands)
+                            +-------------------------------------------+
+ Deye/Sunsynk WR (RS485) <--+  RTU master: block polling -> RegisterCache |
+                            |       ^                                    |
+                            |       | write queue (prioritized)           |
+                            |       v                                    |
+                            |  Modbus TCP :502   MQTT (PubSubClient)     |
+                            +-------+---------------------+--------------+
+                                    |                     |
+                                evcc (native)     Home Assistant
+                                deye-hybrid-3p    (discovery + commands)
 ```
 
-- **Lese-Pfad**: Der Poller liest Registerblöcke (entsprechen den evcc-Block-Reads) und hält ein 1:1-Register-Image im RAM. TCP-Reads antworten ausschließlich aus dem Cache – Netz-Clients blockieren nie den RS485-Bus.
-- **Schreib-Pfad**: TCP- und MQTT-Writes werden gegen eine Whitelist geprüft, optimistic in den Cache gespiegelt, in die Queue gestellt und vom Poller als FC06 an den Wechselrichter gesendet (mit Read-back-Verifikation).
-- **32-Bit-Werte** (Energiezähler) bleiben roh im Cache (Low-Word-First, wie evcc `uint32s` und die üblichen Deye-Dokumentationen) – keine Skalierungslogik in der Brücke.
+- **Read path**: The poller reads register blocks (matching the evcc block reads) and keeps a 1:1 register image in RAM. TCP reads are answered exclusively from the cache – network clients never block the RS485 bus.
+- **Write path**: TCP and MQTT writes are checked against a whitelist, mirrored optimistically into the cache, queued, and sent by the poller as FC06 to the inverter (with read-back verification).
+- **32-bit values** (energy meters) stay raw in the cache (low-word-first, like evcc `uint32s` and the usual Deye/Sunsynk documentation) – no scaling logic in the bridge.
 
-## Bekannte Einschränkungen
+## Known limitations
 
-- **Noch nicht an realer Hardware verifiziert** – vor dem Produktivbetrieb die
-  Werte (Skalierungen, Battery-Strom-Vorzeichen, Register-143-Einheiten)
-  gegen die eigene Inverter-Firmware prüfen; Register-Skalierungen variieren
-  je nach Modell und Firmware-Stand (z. B. HV-Modelle mit Firmware ≥ 1098:
-  Register 143 in 10-W-Schritten, evcc-Option `firmware1098`).
-- Das MQTT-Switch-Entity „Time of Use" schreibt Register 146 als 0x00FF/0.
-  Wenn evcc gleichzeitig Batteriemodus steuert, überschreibt es 146 laufend –
-  HA-Schreibzugriff auf 146/127/166–171 nur mit Bewusstsein (Details in
+- **Not yet verified on real hardware** – before productive use, verify the values (scalings, battery current sign, register-143 units) against your own inverter firmware; register scalings vary by model and firmware version (e.g. HV models with firmware ≥ 1098: register 143 in 10 W steps, evcc option `firmware1098`).
+- The MQTT switch entity "Time of Use" writes register 146 as 0x00FF/0.
+  If evcc controls the battery mode at the same time, it constantly overwrites 146 –
+  use HA write access to 146/127/166–171 only consciously (details in
   [docs/homeassistant.md](docs/homeassistant.md)).
-- Nur ein RTU-Master pro Bus: den Deye-WLAN-Dongle an denselben RS485-Bus
-  stecken geht nicht; die Hybrid-Modelle haben zwei getrennte Busse – Dongle
-  und ESP gehören auf getrennte Busse.
+- Only one RTU master per bus: putting the Deye/Sunsynk WLAN dongle on the same RS485 bus
+  does not work; the hybrid models have two separate buses – dongle
+  and ESP belong on separate buses.
 
-## Lizenz
+## License
 
-MIT – siehe [LICENSE](LICENSE).
+MIT – see [LICENSE](LICENSE).
